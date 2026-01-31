@@ -1,0 +1,55 @@
+paths:
+  /resource-groups/get-available:
+    get:
+      tags:
+        - Resource Groups
+      summary: Get available resource groups
+      description: Retrieves a list of all available resource groups
+      operationId: getAvailableResourceGroups
+      security:
+        - apiKeyAuth: []
+      responses:
+        '200':
+          description: List of available resource groups
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GetAvailableResourceGroupsResponse'
+        '401':
+          description: Authentication error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalServerErrorResponse'
+
+components:
+  schemas:
+    GetAvailableResourceGroupsResponse:
+      type: object
+      properties:
+        resource_groups:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceGroup'
+      required:
+        - resource_groups
+
+    ResourceGroup:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        name:
+          type: string
+          example: Resource Group 1
+      required:
+        - id
+        - name
