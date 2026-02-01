@@ -22,6 +22,10 @@ const deployProjectResources = async (projectId: number) => {
 
   // 10. Create identification job in Identification Service
 
+  // 11. Create attribution calculation job
+
+  // 12. Create ad cost calculation job
+
   return {
     message: 'Project resources deployed successfully',
   }
