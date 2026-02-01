@@ -26,9 +26,7 @@ const deployProjectResources = async (projectId: number) => {
 
   // 12. Create ad cost calculation job
 
-  return {
-    message: 'Project resources deployed successfully',
-  }
+  return
 }
 
 export { deployProjectResources }
