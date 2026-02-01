@@ -1,14 +1,14 @@
+import {
+  IResourceGroupDoc,
+  ResourceGroupDto,
+  ResourceGroupRepository,
+} from '@modules/resource-group'
+
 const getAvailableResourceGroups = async () => {
-  // TODO: Implement this
-  console.log('getAvailableResourceGroups')
-  return {
-    resource_groups: [
-      {
-        id: 1,
-        name: 'Resource Group 1',
-      },
-    ],
-  }
+  const resourceGroups = await ResourceGroupRepository.find()
+  return resourceGroups.map(
+    (resourceGroup: IResourceGroupDoc) => new ResourceGroupDto(resourceGroup as any),
+  )
 }
 
 export { getAvailableResourceGroups }

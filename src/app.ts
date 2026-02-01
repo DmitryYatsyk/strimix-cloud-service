@@ -7,6 +7,7 @@ import { errorMiddleware } from '@presentation/middleware/error.middleware.js'
 import { IRouter } from '@presentation/interfaces/router.interface.js'
 import { swaggerDocs } from '@presentation/utils/swagger'
 import cors from 'cors'
+import { ResourceGroupRepository } from '@modules/resource-group'
 
 class App {
   public express: Application
