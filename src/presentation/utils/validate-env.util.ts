@@ -8,6 +8,8 @@ function validateEnv(): void {
     PORT: port({ default: 5017 }),
     APP_AUTHORIZATION_CODES: str(),
     MONGO_CREDENTIALS: str(),
+    IDENTITY_SERVICE_MONGO_CREDENTIALS: str(),
+    GOOGLE_CLOUD_SERVICE_ACCOUNT: str(),
   })
 }
 
