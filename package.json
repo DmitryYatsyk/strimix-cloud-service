@@ -15,6 +15,7 @@
   "dependencies": {
     "@google-cloud/bigquery": "^8.1.1",
     "@google-cloud/bigquery-data-transfer": "^5.1.2",
+    "@google-cloud/pubsub": "^5.2.2",
     "axios": "^1.13.4",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
