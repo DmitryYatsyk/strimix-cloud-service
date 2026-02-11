@@ -1,4 +1,18 @@
 export const ERRORS = {
+  PROJECT: {
+    NOT_FOUND: {
+      status: 404,
+      code: 'PROJECT_NOT_FOUND',
+      message: 'Project not found',
+    },
+  },
+  RESOURCE_GROUP: {
+    NOT_FOUND: {
+      status: 404,
+      code: 'RESOURCE_GROUP_NOT_FOUND',
+      message: 'Resource group not found',
+    },
+  },
   AUTH: {
     AUTHENTICATION_ERROR: {
       status: 401,

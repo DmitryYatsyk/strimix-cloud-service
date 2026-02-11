@@ -1,8 +1,48 @@
+import { ErrorNotificator } from '@application/providers/error-notificator'
+import { ProjectDataProvider } from '@application/providers/project-data-provider'
 import { IdentificationJobRepository } from '@modules/identification-service'
+import { ResourceGroupRepository } from '@modules/resource-group'
+import { ERRORS } from '@presentation/constants/errors.constants'
+import { HttpException } from '@presentation/exceptions/http.exception'
 
-const deployProjectResources = async (projectId: number) => {
-  // TODO: Implement this
+const deployProjectResources = async (projectId: number, resourceGroupId: string) => {
   console.log('Deploying project resources for project ID:', projectId)
+
+  // 1. Get resource group
+  const resourceGroup = await ResourceGroupRepository.findById(resourceGroupId)
+  if (!resourceGroup) {
+    // Send error notification to technical support service
+    await ErrorNotificator.collect({
+      service_name: 'Cloud Service',
+      project_id: projectId,
+      error_name: 'Resource group not found',
+      input_data: {
+        project_id: projectId,
+        resource_group_id: resourceGroupId,
+      },
+      error_data: {
+        resource_group_id: resourceGroupId,
+      },
+    })
+
+    throw new HttpException(ERRORS.RESOURCE_GROUP.NOT_FOUND)
+  }
+
+  // 2. Check if project exists
+  const projectInfo = await ProjectDataProvider.getProjectInfo(projectId)
+  if (!projectInfo) {
+    // Send error notification to technical support service
+    await ErrorNotificator.collect({
+      service_name: 'Cloud Service',
+      project_id: projectId,
+      error_name: 'Project not found',
+      input_data: {
+        project_id: projectId,
+      },
+    })
+
+    throw new HttpException(ERRORS.PROJECT.NOT_FOUND)
+  }
 
   // 1. Create BigQuery Dataset
 

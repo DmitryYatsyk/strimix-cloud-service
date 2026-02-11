@@ -1,1 +1,4 @@
-export { deployProjectResourcesSchema } from './project-resources.api.schema'
+export {
+  deployProjectResourceQuerySchema,
+  deployProjectResourceBodySchema,
+} from './project-resources.api.schema'

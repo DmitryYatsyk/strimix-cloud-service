@@ -10,7 +10,8 @@ export class ProjectResourcesController {
   ): Promise<void> => {
     try {
       const projectId = Number(req.params.projectId)
-      const result = await deployProjectResources(projectId)
+      const resourceGroupId = req.body.resource_group_id
+      const result = await deployProjectResources(projectId, resourceGroupId)
       res.status(200).json(result)
       return
     } catch (e: any) {

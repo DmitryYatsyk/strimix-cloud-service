@@ -10,6 +10,9 @@ function validateEnv(): void {
     MONGO_CREDENTIALS: str(),
     IDENTITY_SERVICE_MONGO_CREDENTIALS: str(),
     GOOGLE_CLOUD_SERVICE_ACCOUNT: str(),
+    API_GATEWAY_AUTHORIZATION_CODE: str(),
+    API_GATEWAY_HOST: str(),
+    ERROR_NOTIFICATOR_URL: str(),
   })
 }
 
