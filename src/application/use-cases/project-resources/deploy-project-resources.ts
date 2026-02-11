@@ -2,6 +2,7 @@ import { ErrorNotificator } from '@application/providers/error-notificator'
 import { ProjectDataProvider } from '@application/providers/project-data-provider'
 import { IdentificationJobRepository } from '@modules/identification-service'
 import { ResourceGroupRepository } from '@modules/resource-group'
+import { ProjectResourcesRepository } from '@modules/project-resources'
 import { ERRORS } from '@presentation/constants/errors.constants'
 import { HttpException } from '@presentation/exceptions/http.exception'
 
@@ -44,27 +45,48 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     throw new HttpException(ERRORS.PROJECT.NOT_FOUND)
   }
 
-  // 1. Create BigQuery Dataset
+  // 3. Check if project has resources group
+  let projectResources = await ProjectResourcesRepository.findOne({ project_id: projectId })
+  if (!projectResources) {
+    // Create project resources
+    projectResources = await ProjectResourcesRepository.create({
+      project_id: projectId,
+      stream_id: projectInfo.streamId,
+    })
+  }
 
-  // 2. Create BigQuery raw events table (for event log)
+  // 4. Create BigQuery Dataset
+  if (!projectResources.bq_dataset_name) {
+    projectResources.bq_dataset_name = `${projectId}`
+  }
 
-  // 3. Create BigQuery raw events table (for backup from pubsub)
+  // 5. Create BigQuery raw events table (for event log)
 
-  // 4. Create BigQuery identified events table
+  // 6. Create BigQuery raw events table (for backup from pubsub)
 
-  // 5. Create BigQuery excluded referrers table
+  // 7. Create BigQuery identified events table
 
-  // 6. Create BigQuery ad cost table
+  // 8. Create BigQuery excluded referrers table
 
-  // 7. Deploy GCloud PubSub Topic
+  // 9. Create BigQuery ad cost table
 
-  // 8. Deploy GCloud PubSub Raw Events Subscription (for event logs)
+  // 10. Deploy GCloud PubSub Topic
 
-  // 9. Deploy GCloud PubSub BigQuery Raw Events Subscription
+  // 11. Deploy GCloud PubSub Raw Events Subscription (for event logs)
 
-  // 10. Deploy GCloud PubSub Event Processor Subscription
+  // 12. Deploy GCloud PubSub BigQuery Raw Events Subscription
 
-  // 11. Create identification job in Identification Service
+  // 13. Deploy GCloud PubSub Event Processor Subscription
+
+  // 15. Create attribution calculation job
+
+  // 16. Create Facebook Ads ad cost calculation job
+
+  // 17. Create Google Ads ad cost calculation job
+
+  // 15. Create TikTok Ads ad cost calculation job
+
+  // 15. Create identification job in Identification Service
   await IdentificationJobRepository.create({
     project_id: projectId,
     is_running: false,
@@ -72,14 +94,6 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     last_run: 0,
     error_spec: null,
   })
-
-  // 12. Create attribution calculation job
-
-  // 13. Create Facebook Ads ad cost calculation job
-
-  // 14. Create Google Ads ad cost calculation job
-
-  // 15. Create TikTok Ads ad cost calculation job
 
   return
 }
