@@ -5,97 +5,134 @@ import { ResourceGroupRepository } from '@modules/resource-group'
 import { ProjectResourcesRepository } from '@modules/project-resources'
 import { ERRORS } from '@presentation/constants/errors.constants'
 import { HttpException } from '@presentation/exceptions/http.exception'
+import { BigQueryApi } from '@modules/gcloud/bigquery'
 
 const deployProjectResources = async (projectId: number, resourceGroupId: string) => {
-  console.log('Deploying project resources for project ID:', projectId)
+  try {
+    console.log('Deploying project resources for project ID:', projectId)
 
-  // 1. Get resource group
-  const resourceGroup = await ResourceGroupRepository.findById(resourceGroupId)
-  if (!resourceGroup) {
-    // Send error notification to technical support service
+    // 1. Get resource group
+    const resourceGroup = await ResourceGroupRepository.findById(resourceGroupId)
+    if (!resourceGroup) {
+      // Send error notification to technical support service
+      await ErrorNotificator.collect({
+        service_name: 'Cloud Service',
+        project_id: projectId,
+        error_name: 'Resource group not found',
+        input_data: {
+          project_id: projectId,
+          resource_group_id: resourceGroupId,
+        },
+        error_data: {
+          resource_group_id: resourceGroupId,
+        },
+      })
+
+      throw new HttpException(ERRORS.RESOURCE_GROUP.NOT_FOUND)
+    }
+
+    // 2. Check if project exists
+    const projectInfo = await ProjectDataProvider.getProjectInfo(projectId)
+    if (!projectInfo) {
+      // Send error notification to technical support service
+      await ErrorNotificator.collect({
+        service_name: 'Cloud Service',
+        project_id: projectId,
+        error_name: 'Project not found',
+        input_data: {
+          project_id: projectId,
+        },
+      })
+
+      throw new HttpException(ERRORS.PROJECT.NOT_FOUND)
+    }
+
+    // 3. Check if project has resources group
+    let projectResources = await ProjectResourcesRepository.findOne({ project_id: projectId })
+    if (!projectResources) {
+      // Create project resources
+      projectResources = await ProjectResourcesRepository.create({
+        project_id: projectId,
+        stream_id: projectInfo.streamId,
+        gcloud_project_id: resourceGroup.resources.gcloud_project_id,
+      })
+    }
+
+    // 4. Create BigQuery Dataset
+    if (!projectResources.bq_dataset_id) {
+      projectResources.bq_dataset_id = `sx_${projectId}`
+
+      // Check if dataset exists
+      const bigqueryApi = new BigQueryApi({
+        projectId: projectResources.gcloud_project_id,
+        datasetLocation: resourceGroup.resources.gcloud_multi_region_location,
+      })
+
+      const datasetExists = await bigqueryApi.datasetExists(projectResources.bq_dataset_id)
+
+      if (!datasetExists) {
+        await bigqueryApi.createDataset({
+          projectId: projectResources.gcloud_project_id,
+          datasetId: projectResources.bq_dataset_id,
+          location: resourceGroup.resources.gcloud_multi_region_location,
+        })
+      }
+
+      await projectResources.save()
+    }
+
+    // 5. Create BigQuery raw events table (for event log)
+
+    // 6. Create BigQuery raw events table (for backup from pubsub)
+
+    // 7. Create BigQuery identified events table
+
+    // 8. Create BigQuery excluded referrers table
+
+    // 9. Create BigQuery ad cost table
+
+    // 10. Deploy GCloud PubSub Topic
+
+    // 11. Deploy GCloud PubSub Raw Events Subscription (for event logs)
+
+    // 12. Deploy GCloud PubSub BigQuery Raw Events Subscription
+
+    // 13. Deploy GCloud PubSub Event Processor Subscription
+
+    // 15. Create attribution calculation job
+
+    // 16. Create Facebook Ads ad cost calculation job
+
+    // 17. Create Google Ads ad cost calculation job
+
+    // 15. Create TikTok Ads ad cost calculation job
+
+    // 15. Create identification job in Identification Service
+    // await IdentificationJobRepository.create({
+    //   project_id: projectId,
+    //   is_running: false,
+    //   status: 'ACTIVE',
+    //   last_run: 0,
+    //   error_spec: null,
+    // })
+
+    return
+  } catch (error) {
+    console.log('error', error)
     await ErrorNotificator.collect({
       service_name: 'Cloud Service',
       project_id: projectId,
-      error_name: 'Resource group not found',
+      error_name: 'Error deploying project resources',
       input_data: {
         project_id: projectId,
         resource_group_id: resourceGroupId,
       },
       error_data: {
-        resource_group_id: resourceGroupId,
+        error: error,
       },
     })
-
-    throw new HttpException(ERRORS.RESOURCE_GROUP.NOT_FOUND)
+    throw new HttpException(ERRORS.OTHER.INTERNAL_SERVER_ERROR)
   }
-
-  // 2. Check if project exists
-  const projectInfo = await ProjectDataProvider.getProjectInfo(projectId)
-  if (!projectInfo) {
-    // Send error notification to technical support service
-    await ErrorNotificator.collect({
-      service_name: 'Cloud Service',
-      project_id: projectId,
-      error_name: 'Project not found',
-      input_data: {
-        project_id: projectId,
-      },
-    })
-
-    throw new HttpException(ERRORS.PROJECT.NOT_FOUND)
-  }
-
-  // 3. Check if project has resources group
-  let projectResources = await ProjectResourcesRepository.findOne({ project_id: projectId })
-  if (!projectResources) {
-    // Create project resources
-    projectResources = await ProjectResourcesRepository.create({
-      project_id: projectId,
-      stream_id: projectInfo.streamId,
-    })
-  }
-
-  // 4. Create BigQuery Dataset
-  if (!projectResources.bq_dataset_name) {
-    projectResources.bq_dataset_name = `${projectId}`
-  }
-
-  // 5. Create BigQuery raw events table (for event log)
-
-  // 6. Create BigQuery raw events table (for backup from pubsub)
-
-  // 7. Create BigQuery identified events table
-
-  // 8. Create BigQuery excluded referrers table
-
-  // 9. Create BigQuery ad cost table
-
-  // 10. Deploy GCloud PubSub Topic
-
-  // 11. Deploy GCloud PubSub Raw Events Subscription (for event logs)
-
-  // 12. Deploy GCloud PubSub BigQuery Raw Events Subscription
-
-  // 13. Deploy GCloud PubSub Event Processor Subscription
-
-  // 15. Create attribution calculation job
-
-  // 16. Create Facebook Ads ad cost calculation job
-
-  // 17. Create Google Ads ad cost calculation job
-
-  // 15. Create TikTok Ads ad cost calculation job
-
-  // 15. Create identification job in Identification Service
-  await IdentificationJobRepository.create({
-    project_id: projectId,
-    is_running: false,
-    status: 'ACTIVE',
-    last_run: 0,
-    error_spec: null,
-  })
-
-  return
 }
 
 export { deployProjectResources }

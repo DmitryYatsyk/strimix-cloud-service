@@ -6,6 +6,8 @@ export interface IResourceGroupDoc extends Document, Omit<IResourceGroup, 'id'> 
 const ResourcesSchema = new Schema(
   {
     gcloud_project_id: { type: String, required: true },
+    gcloud_multi_region_location: { type: String, required: true },
+    gcloud_single_region_location: { type: String, required: true },
   },
   { _id: false },
 )
