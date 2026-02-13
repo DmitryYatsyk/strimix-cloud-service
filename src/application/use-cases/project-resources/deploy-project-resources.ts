@@ -287,11 +287,17 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 13. Create Facebook Ads ad cost table
+    // 13.1 Create Facebook Ads ad cost table
 
-    // 14. Create Google Ads ad cost table
+    // 13.2 Create Facebook Ads ad cost update scheduled query
 
-    // 15. Create TikTok Ads ad cost table
+    // 14.1 Create Google Ads ad cost table
+
+    // 14.2 Create Google Ads ad cost update scheduled query
+
+    // 15.1 Create TikTok Ads ad cost table
+
+    // 15.2 Create TikTok Ads ad cost update scheduled query
 
     // 16. Create identification job in Identification Service
     // await IdentificationJobRepository.create({
@@ -302,7 +308,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     //   error_spec: null,
     // })
 
-    // 17. Create data processing jobs in data processing service
+    // 17. Create project config in data processing service
 
     return
   } catch (error) {
