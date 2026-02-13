@@ -21,6 +21,7 @@ export interface ICreateTableParams {
     type: 'DAY' | 'HOUR' | 'MONTH' | 'YEAR'
     field?: string
     expirationMs?: number
+    requirePartitionFilter?: boolean
   }
   clustering?: {
     fields: string[]

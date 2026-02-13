@@ -5,7 +5,17 @@ import { ResourceGroupRepository } from '@modules/resource-group'
 import { ProjectResourcesRepository } from '@modules/project-resources'
 import { ERRORS } from '@presentation/constants/errors.constants'
 import { HttpException } from '@presentation/exceptions/http.exception'
-import { BigQueryApi } from '@modules/gcloud/bigquery'
+import {
+  AD_COSTS_TABLE_ID,
+  AD_COSTS_TABLE_SCHEMA,
+  BigQueryApi,
+  EXCLUDED_REFERRERS_TABLE_ID,
+  EXCLUDED_REFERRERS_TABLE_SCHEMA,
+  EXCLUDED_REFERRERS_VIEW_QUERY,
+  IDENTIFIED_EVENTS_TABLE_ID,
+  IDENTIFIED_EVENTS_TABLE_SCHEMA,
+} from '@modules/gcloud/bigquery'
+import { RAW_EVENTS_TABLE_SCHEMA, RAW_EVENTS_TABLE_ID } from '@modules/gcloud/bigquery'
 
 const deployProjectResources = async (projectId: number, resourceGroupId: string) => {
   try {
@@ -55,25 +65,41 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
         project_id: projectId,
         stream_id: projectInfo.streamId,
         gcloud_project_id: resourceGroup.resources.gcloud_project_id,
+        bigquery: {
+          dataset_id: null,
+          dataset_location: null,
+          raw_events_table_id: null,
+          ad_costs_table_id: null,
+          excluded_referrers_table_id: null,
+          identified_events_table_id: null,
+        },
+        pubsub: {
+          event_collector_topic_id: null,
+          event_processor_subscription_id: null,
+          bigquery_raw_events_subscription_id: null,
+        },
       })
     }
 
-    // 4. Create BigQuery Dataset
-    if (!projectResources.bq_dataset_id) {
-      projectResources.bq_dataset_id = `sx_${projectId}`
+    // 4. Create BigQuery API instance
+    const bigqueryApi = new BigQueryApi({
+      projectId: projectResources.gcloud_project_id,
+      datasetLocation: resourceGroup.resources.gcloud_multi_region_location,
+    })
+
+    // 5. Create BigQuery Dataset
+    if (!projectResources.bigquery.dataset_id) {
+      projectResources.bigquery.dataset_id = `sx_${projectId}`
+      projectResources.bigquery.dataset_location =
+        resourceGroup.resources.gcloud_multi_region_location
 
       // Check if dataset exists
-      const bigqueryApi = new BigQueryApi({
-        projectId: projectResources.gcloud_project_id,
-        datasetLocation: resourceGroup.resources.gcloud_multi_region_location,
-      })
-
-      const datasetExists = await bigqueryApi.datasetExists(projectResources.bq_dataset_id)
+      const datasetExists = await bigqueryApi.datasetExists(projectResources.bigquery.dataset_id)
 
       if (!datasetExists) {
         await bigqueryApi.createDataset({
           projectId: projectResources.gcloud_project_id,
-          datasetId: projectResources.bq_dataset_id,
+          datasetId: projectResources.bigquery.dataset_id,
           location: resourceGroup.resources.gcloud_multi_region_location,
         })
       }
@@ -81,33 +107,120 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 5. Create BigQuery raw events table (for event log)
+    // 6. Create BigQuery raw events table
+    if (!projectResources.bigquery.raw_events_table_id) {
+      const tableId = RAW_EVENTS_TABLE_ID
 
-    // 6. Create BigQuery raw events table (for backup from pubsub)
+      const tableExists = await bigqueryApi.tableExists(
+        projectResources.bigquery.dataset_id,
+        tableId,
+      )
+      if (!tableExists) {
+        await bigqueryApi.createTable({
+          projectId: projectResources.gcloud_project_id,
+          datasetId: projectResources.bigquery.dataset_id,
+          tableId,
+          schema: RAW_EVENTS_TABLE_SCHEMA,
+          timePartitioning: {
+            type: 'DAY',
+            field: 'date',
+            requirePartitionFilter: false,
+          },
+        })
+      }
+
+      projectResources.bigquery.raw_events_table_id = `${projectResources.gcloud_project_id}.${projectResources.bigquery.dataset_id}.${tableId}`
+      await projectResources.save()
+    }
 
     // 7. Create BigQuery identified events table
+    if (!projectResources.bigquery.identified_events_table_id) {
+      const tableId = IDENTIFIED_EVENTS_TABLE_ID
+
+      const tableExists = await bigqueryApi.tableExists(
+        projectResources.bigquery.dataset_id,
+        tableId,
+      )
+      if (!tableExists) {
+        await bigqueryApi.createTable({
+          projectId: projectResources.gcloud_project_id,
+          datasetId: projectResources.bigquery.dataset_id,
+          tableId,
+          schema: IDENTIFIED_EVENTS_TABLE_SCHEMA,
+          timePartitioning: {
+            type: 'DAY',
+            field: 'date',
+            requirePartitionFilter: false,
+          },
+        })
+      }
+
+      projectResources.bigquery.identified_events_table_id = `${projectResources.gcloud_project_id}.${projectResources.bigquery.dataset_id}.${tableId}`
+      await projectResources.save()
+    }
 
     // 8. Create BigQuery excluded referrers table
+    if (!projectResources.bigquery.excluded_referrers_table_id) {
+      const viewId = EXCLUDED_REFERRERS_TABLE_ID
+
+      const tableExists = await bigqueryApi.tableExists(
+        projectResources.bigquery.dataset_id,
+        viewId,
+      )
+      if (!tableExists) {
+        await bigqueryApi.createView({
+          projectId: projectResources.gcloud_project_id,
+          datasetId: projectResources.bigquery.dataset_id,
+          viewId,
+          query: EXCLUDED_REFERRERS_VIEW_QUERY,
+        })
+      }
+
+      projectResources.bigquery.excluded_referrers_table_id = `${projectResources.gcloud_project_id}.${projectResources.bigquery.dataset_id}.${viewId}`
+      await projectResources.save()
+    }
 
     // 9. Create BigQuery ad cost table
+    if (!projectResources.bigquery.ad_costs_table_id) {
+      const tableId = AD_COSTS_TABLE_ID
+
+      const tableExists = await bigqueryApi.tableExists(
+        projectResources.bigquery.dataset_id,
+        tableId,
+      )
+      if (!tableExists) {
+        await bigqueryApi.createTable({
+          projectId: projectResources.gcloud_project_id,
+          datasetId: projectResources.bigquery.dataset_id,
+          tableId,
+          schema: AD_COSTS_TABLE_SCHEMA,
+          timePartitioning: {
+            type: 'DAY',
+            field: 'date',
+            requirePartitionFilter: false,
+          },
+        })
+      }
+
+      projectResources.bigquery.ad_costs_table_id = `${projectResources.gcloud_project_id}.${projectResources.bigquery.dataset_id}.${tableId}`
+      await projectResources.save()
+    }
 
     // 10. Deploy GCloud PubSub Topic
 
-    // 11. Deploy GCloud PubSub Raw Events Subscription (for event logs)
+    // 11. Deploy GCloud PubSub BigQuery Raw Events Subscription
 
-    // 12. Deploy GCloud PubSub BigQuery Raw Events Subscription
+    // 12. Deploy GCloud PubSub Event Processor Subscription
 
-    // 13. Deploy GCloud PubSub Event Processor Subscription
+    // 13. Create attribution calculation job
 
-    // 15. Create attribution calculation job
+    // 14. Create Facebook Ads ad cost calculation job
 
-    // 16. Create Facebook Ads ad cost calculation job
+    // 15. Create Google Ads ad cost calculation job
 
-    // 17. Create Google Ads ad cost calculation job
+    // 16. Create TikTok Ads ad cost calculation job
 
-    // 15. Create TikTok Ads ad cost calculation job
-
-    // 15. Create identification job in Identification Service
+    // 17. Create identification job in Identification Service
     // await IdentificationJobRepository.create({
     //   project_id: projectId,
     //   is_running: false,

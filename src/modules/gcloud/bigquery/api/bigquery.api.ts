@@ -63,115 +63,117 @@ export class BigQueryApi {
     }
   }
 
-  // /**
-  //  * Creates a new table with the specified schema in a dataset
-  //  * @param params - Table creation parameters
-  //  * @returns Created table information
-  //  */
-  // public async createTable(params: ICreateTableParams): Promise<ITableInfo> {
-  //   const {
-  //     projectId,
-  //     datasetId,
-  //     tableId,
-  //     schema,
-  //     description,
-  //     timePartitioning,
-  //     clustering,
-  //     labels,
-  //   } = params
+  /**
+   * Creates a new table with the specified schema in a dataset
+   * @param params - Table creation parameters
+   * @returns Created table information
+   */
+  public async createTable(params: ICreateTableParams): Promise<ITableInfo> {
+    const {
+      projectId,
+      datasetId,
+      tableId,
+      schema,
+      description,
+      timePartitioning,
+      clustering,
+      labels,
+    } = params
 
-  //   const bigqueryClient = new BigQuery({ projectId })
-  //   const dataset = bigqueryClient.dataset(datasetId)
+    const dataset = this.bigquery.dataset(datasetId)
 
-  //   const options: Record<string, unknown> = {
-  //     schema: {
-  //       fields: schema,
-  //     },
-  //   }
+    const options: Record<string, unknown> = {
+      schema: {
+        fields: schema,
+      },
+    }
 
-  //   if (description) {
-  //     options.description = description
-  //   }
+    if (description) {
+      options.description = description
+    }
 
-  //   if (timePartitioning) {
-  //     options.timePartitioning = {
-  //       type: timePartitioning.type,
-  //       field: timePartitioning.field,
-  //       expirationMs: timePartitioning.expirationMs,
-  //     }
-  //   }
+    if (timePartitioning) {
+      options.timePartitioning = {
+        type: timePartitioning.type,
+        field: timePartitioning.field,
+        expirationMs: timePartitioning.expirationMs,
+      }
+      if (typeof timePartitioning.requirePartitionFilter !== 'undefined') {
+        options.requirePartitionFilter = timePartitioning.requirePartitionFilter
+      }
+    }
 
-  //   if (clustering) {
-  //     options.clustering = {
-  //       fields: clustering.fields,
-  //     }
-  //   }
+    if (clustering) {
+      options.clustering = {
+        fields: clustering.fields,
+      }
+    }
 
-  //   if (labels) {
-  //     options.labels = labels
-  //   }
+    if (labels) {
+      options.labels = labels
+    }
 
-  //   const [table] = await dataset.createTable(tableId, options)
-  //   const metadata = await table.getMetadata()
+    const [table] = await dataset.createTable(tableId, options)
+    const metadata = await table.getMetadata()
 
-  //   return {
-  //     id: table.id as string,
-  //     datasetId,
-  //     projectId,
-  //     createdAt: metadata[0].creationTime
-  //       ? new Date(parseInt(metadata[0].creationTime))
-  //       : undefined,
-  //     type: 'TABLE',
-  //   }
-  // }
+    return {
+      id: table.id as string,
+      datasetId,
+      projectId,
+      createdAt: metadata[0].creationTime
+        ? new Date(parseInt(metadata[0].creationTime))
+        : undefined,
+      type: 'TABLE',
+    }
+  }
 
-  // /**
-  //  * Creates a new view in a dataset
-  //  * @param params - View creation parameters
-  //  * @returns Created view information
-  //  */
-  // public async createView(params: ICreateViewParams): Promise<ITableInfo> {
-  //   const {
-  //     projectId,
-  //     datasetId,
-  //     viewId,
-  //     query,
-  //     description,
-  //     useLegacySql = false,
-  //     labels,
-  //   } = params
+  /**
+   * Creates a new view in a dataset
+   * @param params - View creation parameters
+   * @returns Created view information
+   */
+  public async createView(params: ICreateViewParams): Promise<ITableInfo> {
+    const {
+      projectId,
+      datasetId,
+      viewId,
+      query,
+      description,
+      useLegacySql = false,
+      labels,
+    } = params
 
-  //   const bigqueryClient = new BigQuery({ projectId })
-  //   const dataset = bigqueryClient.dataset(datasetId)
+    const bigqueryClient = new BigQuery(this.options)
+    const dataset = this.bigquery.dataset(datasetId)
 
-  //   const options: Record<string, unknown> = {
-  //     view: {
-  //       query,
-  //       useLegacySql,
-  //     },
-  //   }
+    const options: Record<string, unknown> = {
+      view: {
+        query,
+        useLegacySql,
+      },
+    }
 
-  //   if (description) {
-  //     options.description = description
-  //   }
+    if (description) {
+      options.description = description
+    }
 
-  //   if (labels) {
-  //     options.labels = labels
-  //   }
+    if (labels) {
+      options.labels = labels
+    }
 
-  //   const [view] = await dataset.createTable(viewId, options)
-  //   const metadata = await view.getMetadata()
+    const [view] = await dataset.createTable(viewId, options)
+    const metadata = await view.getMetadata()
 
-  //   return {
-  //     id: view.id as string,
-  //     datasetId,
-  //     projectId,
-  //     createdAt: metadata[0].creationTime
-  //       ? new Date(parseInt(metadata[0].creationTime))
-  //       : undefined,
-  //     type: 'VIEW',
-  //   }
-  // }
+    return {
+      id: view.id as string,
+      datasetId,
+      projectId,
+      createdAt: metadata[0].creationTime
+        ? new Date(parseInt(metadata[0].creationTime))
+        : undefined,
+      type: 'VIEW',
+    }
+  }
 
   // /**
   //  * Creates a scheduled query job using BigQuery Data Transfer Service
@@ -241,100 +243,16 @@ export class BigQueryApi {
     return exists
   }
 
-  // /**
-  //  * Checks if a table or view exists
-  //  * @param projectId - GCP Project ID
-  //  * @param datasetId - Dataset ID
-  //  * @param tableId - Table or View ID to check
-  //  * @returns True if table/view exists, false otherwise
-  //  */
-  // public async tableExists(
-  //   projectId: string,
-  //   datasetId: string,
-  //   tableId: string,
-  // ): Promise<boolean> {
-  //   const bigqueryClient = new BigQuery({ projectId })
-
-  //   try {
-  //     const [exists] = await bigqueryClient.dataset(datasetId).table(tableId).exists()
-  //     return exists
-  //   } catch {
-  //     return false
-  //   }
-  // }
-
-  // /**
-  //  * Deletes a dataset (optionally with all its contents)
-  //  * @param projectId - GCP Project ID
-  //  * @param datasetId - Dataset ID to delete
-  //  * @param deleteContents - If true, deletes all tables in the dataset first
-  //  */
-  // public async deleteDataset(
-  //   projectId: string,
-  //   datasetId: string,
-  //   deleteContents = false,
-  // ): Promise<void> {
-  //   const bigqueryClient = new BigQuery({ projectId })
-  //   await bigqueryClient.dataset(datasetId).delete({ force: deleteContents })
-  // }
-
-  // /**
-  //  * Deletes a table or view
-  //  * @param projectId - GCP Project ID
-  //  * @param datasetId - Dataset ID
-  //  * @param tableId - Table or View ID to delete
-  //  */
-  // public async deleteTable(projectId: string, datasetId: string, tableId: string): Promise<void> {
-  //   const bigqueryClient = new BigQuery({ projectId })
-  //   await bigqueryClient.dataset(datasetId).table(tableId).delete()
-  // }
-
-  // /**
-  //  * Deletes a scheduled query
-  //  * @param transferConfigName - Full resource name of the transfer config
-  //  */
-  // public async deleteScheduledQuery(transferConfigName: string): Promise<void> {
-  //   await this.dataTransferClient.deleteTransferConfig({ name: transferConfigName })
-  // }
-
-  // /**
-  //  * Lists all datasets in a project
-  //  * @param projectId - GCP Project ID
-  //  * @returns Array of dataset information
-  //  */
-  // public async listDatasets(projectId: string): Promise<IDatasetInfo[]> {
-  //   const bigqueryClient = new BigQuery({ projectId })
-  //   const [datasets] = await bigqueryClient.getDatasets()
-
-  //   return datasets.map((dataset) => ({
-  //     id: dataset.id as string,
-  //     projectId,
-  //     location: '',
-  //   }))
-  // }
-
-  // /**
-  //  * Lists all tables and views in a dataset
-  //  * @param projectId - GCP Project ID
-  //  * @param datasetId - Dataset ID
-  //  * @returns Array of table/view information
-  //  */
-  // public async listTables(projectId: string, datasetId: string): Promise<ITableInfo[]> {
-  //   const bigqueryClient = new BigQuery({ projectId })
-  //   const [tables] = await bigqueryClient.dataset(datasetId).getTables()
-
-  //   return Promise.all(
-  //     tables.map(async (table) => {
-  //       const [metadata] = await table.getMetadata()
-  //       return {
-  //         id: table.id as string,
-  //         datasetId,
-  //         projectId,
-  //         type: metadata.type as 'TABLE' | 'VIEW' | 'EXTERNAL',
-  //       }
-  //     }),
-  //   )
-  // }
+  /**
+   * Checks if a table or view exists
+   * @param datasetId - Dataset ID
+   * @param tableId - Table or View ID to check
+   * @returns True if table/view exists, false otherwise
+   */
+  public async tableExists(datasetId: string, tableId: string): Promise<boolean> {
+    const [exists] = await this.bigquery.dataset(datasetId).table(tableId).exists()
+    return exists
+  }
 
   // /**
   //  * Lists all scheduled queries in a project/location
