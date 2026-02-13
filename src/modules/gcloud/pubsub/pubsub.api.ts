@@ -1,4 +1,4 @@
-import { PubSub, Topic, Subscription } from '@google-cloud/pubsub'
+import { PubSub, Topic, Subscription, v1 } from '@google-cloud/pubsub'
 import type { CreateSubscriptionOptions } from '@google-cloud/pubsub'
 import type {
   ICreateTopicParams,
@@ -7,19 +7,14 @@ import type {
   ITopicInfo,
   ISubscriptionInfo,
 } from './pubsub.interface'
-
+import type { CredentialBody } from 'google-auth-library'
 export class PubSubApi {
-  private readonly defaultPubSub: PubSub
+  private readonly credentials: CredentialBody
+  private readonly pubsub: PubSub
 
-  constructor() {
-    this.defaultPubSub = new PubSub()
-  }
-
-  /**
-   * Gets a PubSub client for a specific project
-   */
-  private getClient(projectId: string): PubSub {
-    return new PubSub({ projectId })
+  constructor({ projectId }: { projectId: string }) {
+    this.credentials = JSON.parse(process.env.GOOGLE_CLOUD_SERVICE_ACCOUNT as string)
+    this.pubsub = new PubSub({ credentials: this.credentials, projectId })
   }
 
   /**
@@ -42,38 +37,31 @@ export class PubSubApi {
     const { projectId, topicId, labels, kmsKeyName, schemaSettings, messageRetentionDuration } =
       params
 
-    const client = this.getClient(projectId)
-
-    const topicOptions: Record<string, unknown> = {}
-
-    if (labels) {
-      topicOptions.labels = labels
-    }
-
-    if (kmsKeyName) {
-      topicOptions.kmsKeyName = kmsKeyName
-    }
-
-    if (schemaSettings) {
-      topicOptions.schemaSettings = {
-        schema: schemaSettings.schema,
-        encoding: schemaSettings.encoding,
-      }
-    }
-
-    if (messageRetentionDuration) {
-      topicOptions.messageRetentionDuration = {
-        seconds: messageRetentionDuration,
-      }
-    }
-
-    const [topic] = await client.createTopic({
-      name: topicId,
-      ...topicOptions,
+    const publisherClient = new v1.PublisherClient({
+      credentials: this.credentials,
+      projectId,
+    })
+    const name = `projects/${projectId}/topics/${topicId}`
+    const [topic] = await publisherClient.createTopic({
+      name,
+      labels,
+      kmsKeyName,
+      schemaSettings: schemaSettings
+        ? {
+            schema: schemaSettings.schema,
+            encoding: schemaSettings.encoding,
+          }
+        : undefined,
+      messageRetentionDuration: messageRetentionDuration
+        ? {
+            seconds: messageRetentionDuration,
+            nanos: 0,
+          }
+        : undefined,
     })
 
     return {
-      name: topic.name,
+      name: topic.name ?? name,
       projectId,
       topicId,
       labels,
@@ -82,67 +70,12 @@ export class PubSubApi {
 
   /**
    * Checks if a topic exists
-   * @param projectId - GCP Project ID
    * @param topicId - Topic ID
    * @returns True if topic exists
    */
-  public async topicExists(projectId: string, topicId: string): Promise<boolean> {
-    const client = this.getClient(projectId)
-
-    try {
-      const [exists] = await client.topic(topicId).exists()
-      return exists
-    } catch {
-      return false
-    }
-  }
-
-  /**
-   * Gets topic information
-   * @param projectId - GCP Project ID
-   * @param topicId - Topic ID
-   * @returns Topic information
-   */
-  public async getTopic(projectId: string, topicId: string): Promise<ITopicInfo> {
-    const client = this.getClient(projectId)
-    const topic = client.topic(topicId)
-    const [metadata] = await topic.getMetadata()
-
-    return {
-      name: metadata.name ?? topic.name,
-      projectId,
-      topicId,
-      labels: metadata.labels as Record<string, string> | undefined,
-    }
-  }
-
-  /**
-   * Lists all topics in a project
-   * @param projectId - GCP Project ID
-   * @returns Array of topic information
-   */
-  public async listTopics(projectId: string): Promise<ITopicInfo[]> {
-    const client = this.getClient(projectId)
-    const [topics] = await client.getTopics()
-
-    return topics.map((topic) => {
-      const topicId = topic.name.split('/').pop() ?? ''
-      return {
-        name: topic.name,
-        projectId,
-        topicId,
-      }
-    })
-  }
-
-  /**
-   * Deletes a topic
-   * @param projectId - GCP Project ID
-   * @param topicId - Topic ID to delete
-   */
-  public async deleteTopic(projectId: string, topicId: string): Promise<void> {
-    const client = this.getClient(projectId)
-    await client.topic(topicId).delete()
+  public async topicExists(topicId: string): Promise<boolean> {
+    const [exists] = await this.pubsub.topic(topicId).exists()
+    return exists
   }
 
   // ============================================
@@ -171,10 +104,10 @@ export class PubSubApi {
       retryPolicy,
       expirationTtlSeconds,
       labels,
+      expirationNever,
     } = params
 
-    const client = this.getClient(projectId)
-    const topic = client.topic(topicId)
+    const topic = this.pubsub.topic(topicId)
 
     const options: CreateSubscriptionOptions = {
       ackDeadlineSeconds,
@@ -187,6 +120,22 @@ export class PubSubApi {
       options.messageRetentionDuration = {
         seconds: messageRetentionDuration,
         nanos: 0,
+      }
+    }
+
+    if (expirationNever) {
+      options.expirationPolicy = {} as unknown as {
+        ttl?: {
+          seconds: number
+          nanos: number
+        }
+      }
+    } else if (expirationTtlSeconds) {
+      options.expirationPolicy = {
+        ttl: {
+          seconds: expirationTtlSeconds,
+          nanos: 0,
+        },
       }
     }
 
@@ -268,6 +217,8 @@ export class PubSubApi {
       useTableSchema = false,
       ackDeadlineSeconds = 10,
       messageRetentionDuration,
+      expirationTtlSeconds,
+      expirationNever,
       retainAckedMessages = false,
       enableMessageOrdering = false,
       filter,
@@ -276,8 +227,7 @@ export class PubSubApi {
       labels,
     } = params
 
-    const client = this.getClient(projectId)
-    const topic = client.topic(topicId)
+    const topic = this.pubsub.topic(topicId)
 
     const options: CreateSubscriptionOptions = {
       bigqueryConfig: {
@@ -296,6 +246,27 @@ export class PubSubApi {
       options.messageRetentionDuration = {
         seconds: messageRetentionDuration,
         nanos: 0,
+      }
+    }
+
+    if (expirationNever) {
+      options.expirationPolicy = {} as unknown as {
+        ttl?: {
+          seconds: number
+          nanos: number
+        }
+      }
+    } else if (expirationTtlSeconds) {
+      options.expirationPolicy = {
+        ttl: {
+          seconds: expirationTtlSeconds,
+          nanos: 0,
+        },
+      } as unknown as {
+        ttl?: {
+          seconds: number
+          nanos: number
+        }
       }
     }
 
@@ -355,174 +326,8 @@ export class PubSubApi {
    * @param subscriptionId - Subscription ID
    * @returns True if subscription exists
    */
-  public async subscriptionExists(projectId: string, subscriptionId: string): Promise<boolean> {
-    const client = this.getClient(projectId)
-
-    try {
-      const [exists] = await client.subscription(subscriptionId).exists()
-      return exists
-    } catch {
-      return false
-    }
-  }
-
-  /**
-   * Gets subscription information
-   * @param projectId - GCP Project ID
-   * @param subscriptionId - Subscription ID
-   * @returns Subscription information
-   */
-  public async getSubscription(projectId: string, subscriptionId: string): Promise<ISubscriptionInfo> {
-    const client = this.getClient(projectId)
-    const subscription = client.subscription(subscriptionId)
-    const [metadata] = await subscription.getMetadata()
-
-    let type: 'PULL' | 'PUSH' | 'BIGQUERY' = 'PULL'
-    if (metadata.pushConfig?.pushEndpoint) {
-      type = 'PUSH'
-    } else if (metadata.bigqueryConfig?.table) {
-      type = 'BIGQUERY'
-    }
-
-    return {
-      name: subscription.name,
-      projectId,
-      subscriptionId,
-      topicName: metadata.topic ?? '',
-      type,
-      ackDeadlineSeconds: metadata.ackDeadlineSeconds ?? 10,
-      messageRetentionDuration: metadata.messageRetentionDuration?.seconds
-        ? this.secondsToDuration(Number(metadata.messageRetentionDuration.seconds))
-        : undefined,
-      enableMessageOrdering: metadata.enableMessageOrdering ?? false,
-      labels: metadata.labels as Record<string, string> | undefined,
-    }
-  }
-
-  /**
-   * Lists all subscriptions in a project
-   * @param projectId - GCP Project ID
-   * @returns Array of subscription information
-   */
-  public async listSubscriptions(projectId: string): Promise<ISubscriptionInfo[]> {
-    const client = this.getClient(projectId)
-    const [subscriptions] = await client.getSubscriptions()
-
-    return Promise.all(
-      subscriptions.map(async (subscription) => {
-        const [metadata] = await subscription.getMetadata()
-        const subscriptionId = subscription.name.split('/').pop() ?? ''
-
-        let type: 'PULL' | 'PUSH' | 'BIGQUERY' = 'PULL'
-        if (metadata.pushConfig?.pushEndpoint) {
-          type = 'PUSH'
-        } else if (metadata.bigqueryConfig?.table) {
-          type = 'BIGQUERY'
-        }
-
-        return {
-          name: subscription.name,
-          projectId,
-          subscriptionId,
-          topicName: metadata.topic ?? '',
-          type,
-          ackDeadlineSeconds: metadata.ackDeadlineSeconds ?? 10,
-          messageRetentionDuration: metadata.messageRetentionDuration?.seconds
-            ? this.secondsToDuration(Number(metadata.messageRetentionDuration.seconds))
-            : undefined,
-          enableMessageOrdering: metadata.enableMessageOrdering ?? false,
-          labels: metadata.labels as Record<string, string> | undefined,
-        }
-      }),
-    )
-  }
-
-  /**
-   * Lists all subscriptions for a specific topic
-   * @param projectId - GCP Project ID
-   * @param topicId - Topic ID
-   * @returns Array of subscription information
-   */
-  public async listTopicSubscriptions(
-    projectId: string,
-    topicId: string,
-  ): Promise<ISubscriptionInfo[]> {
-    const client = this.getClient(projectId)
-    const topic = client.topic(topicId)
-    const [subscriptions] = await topic.getSubscriptions()
-
-    return Promise.all(
-      subscriptions.map(async (subscription) => {
-        const [metadata] = await subscription.getMetadata()
-        const subscriptionId = subscription.name.split('/').pop() ?? ''
-
-        let type: 'PULL' | 'PUSH' | 'BIGQUERY' = 'PULL'
-        if (metadata.pushConfig?.pushEndpoint) {
-          type = 'PUSH'
-        } else if (metadata.bigqueryConfig?.table) {
-          type = 'BIGQUERY'
-        }
-
-        return {
-          name: subscription.name,
-          projectId,
-          subscriptionId,
-          topicName: topic.name,
-          type,
-          ackDeadlineSeconds: metadata.ackDeadlineSeconds ?? 10,
-          messageRetentionDuration: metadata.messageRetentionDuration?.seconds
-            ? this.secondsToDuration(Number(metadata.messageRetentionDuration.seconds))
-            : undefined,
-          enableMessageOrdering: metadata.enableMessageOrdering ?? false,
-          labels: metadata.labels as Record<string, string> | undefined,
-        }
-      }),
-    )
-  }
-
-  /**
-   * Deletes a subscription
-   * @param projectId - GCP Project ID
-   * @param subscriptionId - Subscription ID to delete
-   */
-  public async deleteSubscription(projectId: string, subscriptionId: string): Promise<void> {
-    const client = this.getClient(projectId)
-    await client.subscription(subscriptionId).delete()
-  }
-
-  /**
-   * Updates subscription acknowledge deadline
-   * @param projectId - GCP Project ID
-   * @param subscriptionId - Subscription ID
-   * @param ackDeadlineSeconds - New acknowledge deadline in seconds (10-600)
-   */
-  public async updateSubscriptionAckDeadline(
-    projectId: string,
-    subscriptionId: string,
-    ackDeadlineSeconds: number,
-  ): Promise<void> {
-    const client = this.getClient(projectId)
-    const subscription = client.subscription(subscriptionId)
-
-    await subscription.setMetadata({
-      ackDeadlineSeconds,
-    })
-  }
-
-  /**
-   * Seeks a subscription to a specific timestamp (replay messages)
-   * @param projectId - GCP Project ID
-   * @param subscriptionId - Subscription ID
-   * @param timestamp - Timestamp to seek to
-   */
-  public async seekSubscription(
-    projectId: string,
-    subscriptionId: string,
-    timestamp: Date,
-  ): Promise<void> {
-    const client = this.getClient(projectId)
-    const subscription = client.subscription(subscriptionId)
-
-    await subscription.seek(timestamp)
+  public async subscriptionExists(subscriptionId: string): Promise<boolean> {
+    const [exists] = await this.pubsub.subscription(subscriptionId).exists()
+    return exists
   }
 }

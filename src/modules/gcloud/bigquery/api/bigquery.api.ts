@@ -1,13 +1,10 @@
 import { BigQuery, BigQueryOptions } from '@google-cloud/bigquery'
-import { DataTransferServiceClient, protos } from '@google-cloud/bigquery-data-transfer'
 import type {
   ICreateDatasetParams,
   ICreateTableParams,
   ICreateViewParams,
-  ICreateScheduledQueryParams,
   IDatasetInfo,
   ITableInfo,
-  IScheduledQueryInfo,
   MultiRegionLocation,
 } from '../bigquery.interface'
 import type { CredentialBody } from 'google-auth-library'
@@ -17,7 +14,6 @@ export class BigQueryApi {
   private readonly location: MultiRegionLocation
   private readonly options: BigQueryOptions
   private readonly bigquery: BigQuery
-  // private readonly dataTransferClient: DataTransferServiceClient
 
   constructor({
     projectId,
@@ -33,7 +29,6 @@ export class BigQueryApi {
       projectId: projectId,
     }
     this.bigquery = new BigQuery(this.options)
-    // this.dataTransferClient = new DataTransferServiceClient()
   }
 
   /**
@@ -175,63 +170,6 @@ export class BigQueryApi {
     }
   }
 
-  // /**
-  //  * Creates a scheduled query job using BigQuery Data Transfer Service
-  //  * @param params - Scheduled query creation parameters
-  //  * @returns Created scheduled query information
-  //  */
-  // public async createScheduledQuery(
-  //   params: ICreateScheduledQueryParams,
-  // ): Promise<IScheduledQueryInfo> {
-  //   const {
-  //     projectId,
-  //     location,
-  //     destinationDatasetId,
-  //     displayName,
-  //     query,
-  //     schedule,
-  //     destinationTableNameTemplate,
-  //     writeDisposition = 'WRITE_TRUNCATE',
-  //     partitioningField = '',
-  //     serviceAccountEmail,
-  //   } = params
-
-  //   const parent = `projects/${projectId}/locations/${location}`
-
-  //   const transferConfig: protos.google.cloud.bigquery.datatransfer.v1.ITransferConfig = {
-  //     destinationDatasetId,
-  //     displayName,
-  //     dataSourceId: 'scheduled_query',
-  //     params: {
-  //       fields: {
-  //         query: { stringValue: query },
-  //         write_disposition: { stringValue: writeDisposition },
-  //         partitioning_field: { stringValue: partitioningField },
-  //         ...(destinationTableNameTemplate && {
-  //           destination_table_name_template: { stringValue: destinationTableNameTemplate },
-  //         }),
-  //       },
-  //     },
-  //     schedule,
-  //   }
-
-  //   const request: protos.google.cloud.bigquery.datatransfer.v1.ICreateTransferConfigRequest = {
-  //     parent,
-  //     transferConfig,
-  //     ...(serviceAccountEmail && { serviceAccountName: serviceAccountEmail }),
-  //   }
-
-  //   const [response] = await this.dataTransferClient.createTransferConfig(request)
-
-  //   return {
-  //     name: response.name ?? '',
-  //     displayName: response.displayName ?? displayName,
-  //     destinationDatasetId: response.destinationDatasetId ?? destinationDatasetId,
-  //     schedule: response.schedule ?? schedule,
-  //     state: this.getTransferStateString(response.state),
-  //   }
-  // }
-
   /**
    * Checks if a dataset exists
    * @param projectId - GCP Project ID
@@ -253,66 +191,4 @@ export class BigQueryApi {
     const [exists] = await this.bigquery.dataset(datasetId).table(tableId).exists()
     return exists
   }
-
-  // /**
-  //  * Lists all scheduled queries in a project/location
-  //  * @param projectId - GCP Project ID
-  //  * @param location - Location (e.g., 'US', 'EU')
-  //  * @returns Array of scheduled query information
-  //  */
-  // public async listScheduledQueries(
-  //   projectId: string,
-  //   location: string,
-  // ): Promise<IScheduledQueryInfo[]> {
-  //   const parent = `projects/${projectId}/locations/${location}`
-
-  //   const [transferConfigs] = await this.dataTransferClient.listTransferConfigs({
-  //     parent,
-  //     dataSourceIds: ['scheduled_query'],
-  //   })
-
-  //   return transferConfigs.map((config) => ({
-  //     name: config.name ?? '',
-  //     displayName: config.displayName ?? '',
-  //     destinationDatasetId: config.destinationDatasetId ?? '',
-  //     schedule: config.schedule ?? '',
-  //     state: this.getTransferStateString(config.state),
-  //   }))
-  // }
-
-  // /**
-  //  * Converts transfer state enum to string representation
-  //  */
-  // private getTransferStateString(
-  //   state:
-  //     | protos.google.cloud.bigquery.datatransfer.v1.TransferState
-  //     | keyof typeof protos.google.cloud.bigquery.datatransfer.v1.TransferState
-  //     | null
-  //     | undefined,
-  // ): string {
-  //   if (state === null || state === undefined) {
-  //     return 'UNSPECIFIED'
-  //   }
-
-  //   if (typeof state === 'string') {
-  //     return state
-  //   }
-
-  //   const TransferState = protos.google.cloud.bigquery.datatransfer.v1.TransferState
-
-  //   switch (state) {
-  //     case TransferState.PENDING:
-  //       return 'PENDING'
-  //     case TransferState.RUNNING:
-  //       return 'RUNNING'
-  //     case TransferState.SUCCEEDED:
-  //       return 'SUCCEEDED'
-  //     case TransferState.FAILED:
-  //       return 'FAILED'
-  //     case TransferState.CANCELLED:
-  //       return 'CANCELLED'
-  //     default:
-  //       return 'UNSPECIFIED'
-  //   }
-  // }
 }

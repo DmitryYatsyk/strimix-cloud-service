@@ -25,6 +25,8 @@ export interface ICreatePullSubscriptionParams {
   messageRetentionDuration?: number
   /** Retain acknowledged messages (default: false) */
   retainAckedMessages?: boolean
+  /** Never expire subscription (overrides expirationTtlSeconds) */
+  expirationNever?: boolean
   /** Enable message ordering by ordering key (default: false) */
   enableMessageOrdering?: boolean
   /** Enable exactly once delivery (default: false) */
@@ -66,6 +68,10 @@ export interface ICreateBigQuerySubscriptionParams {
   messageRetentionDuration?: number
   /** Retain acknowledged messages (default: false) */
   retainAckedMessages?: boolean
+  /** Subscription expiration TTL in seconds */
+  expirationTtlSeconds?: number
+  /** Never expire subscription (overrides expirationTtlSeconds) */
+  expirationNever?: boolean
   /** Enable message ordering by ordering key (default: false) */
   enableMessageOrdering?: boolean
   /** Filter expression for messages */
