@@ -1,4 +1,4 @@
-import { Document, Schema, model } from 'mongoose'
+import mongoose, { Document, Schema, model } from 'mongoose'
 import { IIdentificationJob } from './identification-service.interface'
 
 export interface IIdentificationJobDoc extends Document, Omit<IIdentificationJob, 'id'> {}
@@ -11,7 +11,11 @@ const IdentificationJobSchema = new Schema({
   error_spec: { type: Object, required: false },
 })
 
-const IdentificationJobRepository = model<IIdentificationJobDoc>(
+const IdentificationJobConn = mongoose.createConnection(
+  process.env.IDENTITY_SERVICE_MONGO_CREDENTIALS as string,
+)
+
+const IdentificationJobRepository = IdentificationJobConn.model<IIdentificationJobDoc>(
   'identification_jobs',
   IdentificationJobSchema,
 )

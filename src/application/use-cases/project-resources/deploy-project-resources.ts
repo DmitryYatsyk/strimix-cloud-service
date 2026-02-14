@@ -27,6 +27,7 @@ import {
   EVENT_PROCESSOR_SUBSCRIPTION_ID_PREFIX,
   PubSubApi,
 } from '@modules/gcloud/pubsub'
+import { ProjectConfigRepository as DataProcessingServiceProjectConfigRepository } from '@modules/data-processing-service/project-config'
 
 const deployProjectResources = async (projectId: number, resourceGroupId: string) => {
   try {
@@ -380,18 +381,51 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     // 16 Create attribution calculation scheduled query
 
     // 16. Create identification job in Identification Service
-    // await IdentificationJobRepository.create({
-    //   project_id: projectId,
-    //   is_running: false,
-    //   status: 'ACTIVE',
-    //   last_run: 0,
-    //   error_spec: null,
-    // })
+    let identificationJob = await IdentificationJobRepository.findOne({
+      project_id: projectId,
+    })
+    if (!identificationJob) {
+      identificationJob = await IdentificationJobRepository.create({
+        project_id: projectId,
+        is_running: false,
+        status: 'ACTIVE',
+        last_run: 0,
+        error_spec: null,
+      })
+
+      projectResources.identification_service.job_id = identificationJob.id
+      await projectResources.save()
+    } else if (!projectResources.identification_service.job_id) {
+      projectResources.identification_service.job_id = identificationJob.id
+      await projectResources.save()
+    }
 
     // 17. Create project config in data processing service
-    // await DataProcessingService.createProjectConfig({
-    //   project_id: projectId,
-    // })
+    let projectConfig = await DataProcessingServiceProjectConfigRepository.findOne({
+      project_id: projectId,
+    })
+    if (!projectConfig) {
+      projectConfig = await DataProcessingServiceProjectConfigRepository.create({
+        project_id: projectId,
+        unattributed_events_threshold: 1,
+        ignored_event_filters: [],
+        jobs: {
+          check_unattributed_events_share: { is_running: false, last_run: 0 },
+          check_ad_costs_without_visits: { is_running: false, last_run: 0 },
+          calculate_events_attribution: { is_running: false, last_run: 0 },
+          update_facebook_ad_costs: { is_running: false, last_run: 0 },
+          update_google_ad_costs: { is_running: false, last_run: 0 },
+          update_tiktok_ad_costs: { is_running: false, last_run: 0 },
+          update_manual_ad_costs: { is_running: false, last_run: 0 },
+        },
+      })
+
+      projectResources.data_processing_service.project_config_id = projectConfig.id
+      await projectResources.save()
+    } else if (!projectResources.data_processing_service.project_config_id) {
+      projectResources.data_processing_service.project_config_id = projectConfig.id
+      await projectResources.save()
+    }
 
     // 18. Add project resources to API Gateway DB
 
