@@ -8,12 +8,14 @@ import type {
   MultiRegionLocation,
 } from '../bigquery.interface'
 import type { CredentialBody } from 'google-auth-library'
+import { DataTransferServiceClient } from '@google-cloud/bigquery-data-transfer'
 
 export class BigQueryApi {
   private readonly credentials: CredentialBody
   private readonly location: MultiRegionLocation
-  private readonly options: BigQueryOptions
   private readonly bigquery: BigQuery
+  private readonly bqTransfer: DataTransferServiceClient
+  private readonly projectId: string
 
   constructor({
     projectId,
@@ -24,11 +26,15 @@ export class BigQueryApi {
   }) {
     this.credentials = JSON.parse(process.env.GOOGLE_CLOUD_SERVICE_ACCOUNT as string)
     this.location = datasetLocation
-    this.options = {
+    this.projectId = projectId
+    this.bigquery = new BigQuery({
       credentials: this.credentials,
       projectId: projectId,
-    }
-    this.bigquery = new BigQuery(this.options)
+    })
+    this.bqTransfer = new DataTransferServiceClient({
+      credentials: this.credentials,
+      projectId: projectId,
+    })
   }
 
   /**
@@ -138,7 +144,6 @@ export class BigQueryApi {
       labels,
     } = params
 
-    const bigqueryClient = new BigQuery(this.options)
     const dataset = this.bigquery.dataset(datasetId)
 
     const options: Record<string, unknown> = {
@@ -190,5 +195,83 @@ export class BigQueryApi {
   public async tableExists(datasetId: string, tableId: string): Promise<boolean> {
     const [exists] = await this.bigquery.dataset(datasetId).table(tableId).exists()
     return exists
+  }
+
+  /**
+   * Finds Scheduled Query by displayName
+   * Prevents duplicate creation
+   */
+  public async findScheduledQueryByName(displayName: string): Promise<{
+    exists: boolean
+    configId?: string
+    name?: string
+  }> {
+    const parent = `projects/${this.projectId}/locations/${this.location}`
+
+    const [configs] = await this.bqTransfer.listTransferConfigs({ parent })
+    const found = configs.find((config) => config.displayName === displayName)
+    if (found && found.name) {
+      return {
+        exists: true,
+        name: found.name,
+        configId: found.name.split('/').pop(),
+      }
+    }
+
+    return { exists: false }
+  }
+
+  /**
+   * Creates a Scheduled Query (TransferConfig)
+   * @returns Created config info (resource name + configId)
+   */
+  public async createScheduledQuery(params: {
+    datasetId: string
+    displayName: string
+    query: string
+    schedule?: string // e.g. "every 24 hours"
+    destinationTableNameTemplate?: string // e.g. "events_{run_date}"
+    writeDisposition?: 'WRITE_TRUNCATE' | 'WRITE_APPEND' | 'WRITE_EMPTY'
+    partitioningField?: string // optional
+    serviceAccountName?: string // optional: run as SA (recommended in prod)
+    disabled?: boolean
+  }): Promise<{ name: string; configId: string }> {
+    const {
+      datasetId,
+      displayName,
+      query,
+      schedule = 'every 24 hours',
+      destinationTableNameTemplate = 'scheduled_{run_date}',
+      writeDisposition = 'WRITE_TRUNCATE',
+      partitioningField = '',
+      serviceAccountName,
+      disabled = false,
+    } = params
+
+    const parent = `projects/${this.projectId}/locations/${this.location}`
+
+    const transferConfig: any = {
+      destinationDatasetId: datasetId,
+      displayName,
+      dataSourceId: 'scheduled_query',
+      schedule,
+      disabled,
+      params: {
+        query,
+        destination_table_name_template: destinationTableNameTemplate,
+        write_disposition: writeDisposition,
+        partitioning_field: partitioningField, // empty string = no partitioning
+      },
+    }
+
+    const request: any = { parent, transferConfig }
+    if (serviceAccountName) request.serviceAccountName = serviceAccountName
+
+    const [config] = await this.bqTransfer.createTransferConfig(request)
+
+    const name = config.name as string
+    const configId = name.split('/').pop() as string
+
+    return { name, configId }
   }
 }

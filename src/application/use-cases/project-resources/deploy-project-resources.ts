@@ -321,6 +321,18 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     }
 
     // 13.2 Create Facebook Ads ad cost update scheduled query
+    const facebookAdsAdCostsUpdateScheduledQueryExists = await bigqueryApi.findScheduledQueryByName(
+      `facebook_ads_ad_costs_update_${projectId}`,
+    )
+
+    if (!facebookAdsAdCostsUpdateScheduledQueryExists.exists) {
+      console.log('Creating Facebook Ads ad cost update scheduled query...')
+      // await bigqueryApi.createScheduledQuery({
+      //   datasetId: projectResources.gcloud.bigquery.dataset_id,
+      //   displayName: 'facebook_ads_ad_costs_update',
+      //   query: 'SELECT * FROM `facebook_ads_ad_costs`',
+      // })
+    }
 
     // 14.1 Create Google Ads ad cost table
     if (!projectResources.gcloud.bigquery.google_ads_ad_costs_table_id) {
@@ -349,6 +361,17 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     }
 
     // 14.2 Create Google Ads ad cost update scheduled query
+    const googleAdsAdCostsUpdateScheduledQueryExists = await bigqueryApi.findScheduledQueryByName(
+      `google_ads_ad_costs_update_${projectId}`,
+    )
+    if (!googleAdsAdCostsUpdateScheduledQueryExists.exists) {
+      console.log('Creating Google Ads ad cost update scheduled query...')
+      // await bigqueryApi.createScheduledQuery({
+      //   datasetId: projectResources.gcloud.bigquery.dataset_id,
+      //   displayName: 'google_ads_ad_costs_update',
+      //   query: 'SELECT * FROM `google_ads_ad_costs`',
+      // })
+    }
 
     // 15.1 Create TikTok Ads ad cost table
     if (!projectResources.gcloud.bigquery.tiktok_ads_ad_costs_table_id) {
@@ -377,8 +400,30 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     }
 
     // 15.2 Create TikTok Ads ad cost update scheduled query
+    const tiktokAdsAdCostsUpdateScheduledQueryExists = await bigqueryApi.findScheduledQueryByName(
+      `tiktok_ads_ad_costs_update_${projectId}`,
+    )
+    if (!tiktokAdsAdCostsUpdateScheduledQueryExists.exists) {
+      console.log('Creating TikTok Ads ad cost update scheduled query...')
+      // await bigqueryApi.createScheduledQuery({
+      //   datasetId: projectResources.gcloud.bigquery.dataset_id,
+      //   displayName: 'tiktok_ads_ad_costs_update',
+      //   query: 'SELECT * FROM `tiktok_ads_ad_costs`',
+      // })
+    }
 
     // 16 Create attribution calculation scheduled query
+    const attributionCalculationScheduledQueryExists = await bigqueryApi.findScheduledQueryByName(
+      `attribution_calculation_${projectId}`,
+    )
+    if (!attributionCalculationScheduledQueryExists.exists) {
+      console.log('Creating attribution calculation scheduled query...')
+      // await bigqueryApi.createScheduledQuery({
+      //   datasetId: projectResources.gcloud.bigquery.dataset_id,
+      //   displayName: 'attribution_calculation',
+      //   query: 'SELECT * FROM `attribution_calculation`',
+      // })
+    }
 
     // 16. Create identification job in Identification Service
     let identificationJob = await IdentificationJobRepository.findOne({
