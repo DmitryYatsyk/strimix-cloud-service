@@ -14,6 +14,13 @@ export const FACEBOOK_ADS_AD_COSTS_TABLE_SCHEMA = [
   { name: 'landing_page_url', type: 'STRING' },
   { name: 'landing_hostname', type: 'STRING' },
   { name: 'landing_page_path', type: 'STRING' },
+  { name: 'campaign_id', type: 'STRING' },
+  { name: 'campaign_name', type: 'STRING' },
+  { name: 'adset_id', type: 'STRING' },
+  { name: 'adset_name', type: 'STRING' },
+  { name: 'ad_id', type: 'STRING' },
+  { name: 'ad_name', type: 'STRING' },
+  { name: 'creative_image_url', type: 'STRING' },
   {
     name: 'url_params',
     type: 'RECORD',
@@ -23,10 +30,7 @@ export const FACEBOOK_ADS_AD_COSTS_TABLE_SCHEMA = [
       {
         name: 'value',
         type: 'RECORD',
-        fields: {
-          name: 'string_value',
-          type: 'STRING',
-        },
+        fields: [{ name: 'string_value', type: 'STRING' }],
       },
     ],
   },
@@ -36,5 +40,4 @@ export const FACEBOOK_ADS_AD_COSTS_TABLE_SCHEMA = [
   { name: 'reach', type: 'INTEGER' },
   { name: 'clicks', type: 'INTEGER' },
   { name: 'click_delay', type: 'BOOLEAN' },
-  { name: 'ad_id', type: 'STRING' },
 ]

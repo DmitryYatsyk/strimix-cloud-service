@@ -10,6 +10,9 @@ export interface IProjectResources {
       ad_costs_table_id: string | null
       excluded_referrers_table_id: string | null
       identified_events_table_id: string | null
+      facebook_ads_ad_costs_table_id: string | null
+      google_ads_ad_costs_table_id: string | null
+      tiktok_ads_ad_costs_table_id: string | null
     }
     pubsub: {
       event_collector_topic_id: string | null

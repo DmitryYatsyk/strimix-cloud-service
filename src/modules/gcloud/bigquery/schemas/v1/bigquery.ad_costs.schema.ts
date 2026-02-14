@@ -31,5 +31,11 @@ export const AD_COSTS_TABLE_SCHEMA = [
   { name: 'clicks', type: 'INTEGER' },
   { name: 'click_delay', type: 'BOOLEAN' },
   { name: 'data_source', type: 'STRING' },
+  { name: 'campaign_id', type: 'STRING' },
+  { name: 'campaign_name', type: 'STRING' },
+  { name: 'adgroup_id', type: 'STRING' },
+  { name: 'adgroup_name', type: 'STRING' },
   { name: 'ad_id', type: 'STRING' },
+  { name: 'ad_name', type: 'STRING' },
+  { name: 'creative_image_url', type: 'STRING' },
 ]

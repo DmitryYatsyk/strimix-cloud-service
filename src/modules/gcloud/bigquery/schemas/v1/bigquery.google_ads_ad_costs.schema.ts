@@ -23,10 +23,7 @@ export const GOOGLE_ADS_AD_COSTS_TABLE_SCHEMA = [
       {
         name: 'value',
         type: 'RECORD',
-        fields: {
-          name: 'string_value',
-          type: 'STRING',
-        },
+        fields: [{ name: 'string_value', type: 'STRING' }],
       },
     ],
   },

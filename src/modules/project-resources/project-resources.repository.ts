@@ -16,6 +16,9 @@ const ProjectResourcesSchema = new Schema(
         ad_costs_table_id: { type: String, default: null },
         excluded_referrers_table_id: { type: String, default: null },
         identified_events_table_id: { type: String, default: null },
+        facebook_ads_ad_costs_table_id: { type: String, default: null },
+        google_ads_ad_costs_table_id: { type: String, default: null },
+        tiktok_ads_ad_costs_table_id: { type: String, default: null },
       },
       pubsub: {
         event_collector_topic_id: { type: String, default: null },

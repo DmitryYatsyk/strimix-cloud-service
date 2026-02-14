@@ -11,8 +11,14 @@ import {
   BigQueryApi,
   EXCLUDED_REFERRERS_TABLE_ID,
   EXCLUDED_REFERRERS_VIEW_QUERY,
+  GOOGLE_ADS_AD_COSTS_TABLE_ID,
+  GOOGLE_ADS_AD_COSTS_TABLE_SCHEMA,
   IDENTIFIED_EVENTS_TABLE_ID,
   IDENTIFIED_EVENTS_TABLE_SCHEMA,
+  FACEBOOK_ADS_AD_COSTS_TABLE_ID,
+  FACEBOOK_ADS_AD_COSTS_TABLE_SCHEMA,
+  TIKTOK_ADS_AD_COSTS_TABLE_SCHEMA,
+  TIKTOK_ADS_AD_COSTS_TABLE_ID,
 } from '@modules/gcloud/bigquery'
 import { RAW_EVENTS_TABLE_SCHEMA, RAW_EVENTS_TABLE_ID } from '@modules/gcloud/bigquery'
 import {
@@ -288,16 +294,90 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     }
 
     // 13.1 Create Facebook Ads ad cost table
+    if (!projectResources.gcloud.bigquery.facebook_ads_ad_costs_table_id) {
+      const tableId = FACEBOOK_ADS_AD_COSTS_TABLE_ID
+      const tableExists = await bigqueryApi.tableExists(
+        projectResources.gcloud.bigquery.dataset_id,
+        tableId,
+      )
+
+      if (!tableExists) {
+        await bigqueryApi.createTable({
+          projectId: projectResources.gcloud.project_id,
+          datasetId: projectResources.gcloud.bigquery.dataset_id,
+          tableId,
+          schema: FACEBOOK_ADS_AD_COSTS_TABLE_SCHEMA,
+          timePartitioning: {
+            type: 'DAY',
+            field: 'date',
+            requirePartitionFilter: false,
+          },
+        })
+      }
+
+      projectResources.gcloud.bigquery.facebook_ads_ad_costs_table_id = `${projectResources.gcloud.project_id}.${projectResources.gcloud.bigquery.dataset_id}.${tableId}`
+      await projectResources.save()
+    }
 
     // 13.2 Create Facebook Ads ad cost update scheduled query
 
     // 14.1 Create Google Ads ad cost table
+    if (!projectResources.gcloud.bigquery.google_ads_ad_costs_table_id) {
+      const tableId = GOOGLE_ADS_AD_COSTS_TABLE_ID
+      const tableExists = await bigqueryApi.tableExists(
+        projectResources.gcloud.bigquery.dataset_id,
+        tableId,
+      )
+
+      if (!tableExists) {
+        await bigqueryApi.createTable({
+          projectId: projectResources.gcloud.project_id,
+          datasetId: projectResources.gcloud.bigquery.dataset_id,
+          tableId,
+          schema: GOOGLE_ADS_AD_COSTS_TABLE_SCHEMA,
+          timePartitioning: {
+            type: 'DAY',
+            field: 'date',
+            requirePartitionFilter: false,
+          },
+        })
+      }
+
+      projectResources.gcloud.bigquery.google_ads_ad_costs_table_id = `${projectResources.gcloud.project_id}.${projectResources.gcloud.bigquery.dataset_id}.${tableId}`
+      await projectResources.save()
+    }
 
     // 14.2 Create Google Ads ad cost update scheduled query
 
     // 15.1 Create TikTok Ads ad cost table
+    if (!projectResources.gcloud.bigquery.tiktok_ads_ad_costs_table_id) {
+      const tableId = TIKTOK_ADS_AD_COSTS_TABLE_ID
+      const tableExists = await bigqueryApi.tableExists(
+        projectResources.gcloud.bigquery.dataset_id,
+        tableId,
+      )
+
+      if (!tableExists) {
+        await bigqueryApi.createTable({
+          projectId: projectResources.gcloud.project_id,
+          datasetId: projectResources.gcloud.bigquery.dataset_id,
+          tableId,
+          schema: TIKTOK_ADS_AD_COSTS_TABLE_SCHEMA,
+          timePartitioning: {
+            type: 'DAY',
+            field: 'date',
+            requirePartitionFilter: false,
+          },
+        })
+      }
+
+      projectResources.gcloud.bigquery.tiktok_ads_ad_costs_table_id = `${projectResources.gcloud.project_id}.${projectResources.gcloud.bigquery.dataset_id}.${tableId}`
+      await projectResources.save()
+    }
 
     // 15.2 Create TikTok Ads ad cost update scheduled query
+
+    // 16 Create attribution calculation scheduled query
 
     // 16. Create identification job in Identification Service
     // await IdentificationJobRepository.create({
@@ -309,6 +389,11 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     // })
 
     // 17. Create project config in data processing service
+    // await DataProcessingService.createProjectConfig({
+    //   project_id: projectId,
+    // })
+
+    // 18. Add project resources to API Gateway DB
 
     return
   } catch (error) {
