@@ -16,7 +16,7 @@ export interface IProjectResources {
     }
     pubsub: {
       event_collector_topic_id: string | null
-      event_processor_subscription_id: string | null
+      identity_service_subscription_id: string | null
       bigquery_raw_events_subscription_id: string | null
     }
   }

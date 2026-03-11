@@ -9,4 +9,4 @@ export type {
 
 export { EVENT_COLLECTOR_TOPIC_ID_PREFIX } from './pubsub.constants'
 export { BIGQUERY_RAW_EVENTS_SUBSCRIPTION_ID_PREFIX } from './pubsub.constants'
-export { EVENT_PROCESSOR_SUBSCRIPTION_ID_PREFIX } from './pubsub.constants'
+export { IDENTITY_SERVICE_SUBSCRIPTION_ID_PREFIX } from './pubsub.constants'

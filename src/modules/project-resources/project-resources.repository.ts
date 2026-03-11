@@ -22,7 +22,7 @@ const ProjectResourcesSchema = new Schema(
       },
       pubsub: {
         event_collector_topic_id: { type: String, default: null },
-        event_processor_subscription_id: { type: String, default: null },
+        identity_service_subscription_id: { type: String, default: null },
         bigquery_raw_events_subscription_id: { type: String, default: null },
       },
     },

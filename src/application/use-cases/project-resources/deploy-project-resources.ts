@@ -24,7 +24,7 @@ import { RAW_EVENTS_TABLE_SCHEMA, RAW_EVENTS_TABLE_ID } from '@modules/gcloud/bi
 import {
   BIGQUERY_RAW_EVENTS_SUBSCRIPTION_ID_PREFIX,
   EVENT_COLLECTOR_TOPIC_ID_PREFIX,
-  EVENT_PROCESSOR_SUBSCRIPTION_ID_PREFIX,
+  IDENTITY_SERVICE_SUBSCRIPTION_ID_PREFIX,
   PubSubApi,
 } from '@modules/gcloud/pubsub'
 import { ProjectConfigRepository as DataProcessingServiceProjectConfigRepository } from '@modules/data-processing-service/project-config'
@@ -88,7 +88,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
           },
           pubsub: {
             event_collector_topic_id: null,
-            event_processor_subscription_id: null,
+            identity_service_subscription_id: null,
             bigquery_raw_events_subscription_id: null,
           },
         },
@@ -273,9 +273,9 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 12. Deploy GCloud PubSub Event Processor Subscription
-    if (!projectResources.gcloud.pubsub.event_processor_subscription_id) {
-      const subscriptionId = `${EVENT_PROCESSOR_SUBSCRIPTION_ID_PREFIX}_${projectId}`
+    // 12. Deploy GCloud PubSub Identity Service Subscription
+    if (!projectResources.gcloud.pubsub.identity_service_subscription_id) {
+      const subscriptionId = `${IDENTITY_SERVICE_SUBSCRIPTION_ID_PREFIX}_${projectId}`
       const subscriptionExists = await pubsubApi.subscriptionExists(subscriptionId)
       if (!subscriptionExists) {
         await pubsubApi.createPullSubscription({
@@ -290,7 +290,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
         })
       }
 
-      projectResources.gcloud.pubsub.event_processor_subscription_id = subscriptionId
+      projectResources.gcloud.pubsub.identity_service_subscription_id = subscriptionId
       await projectResources.save()
     }
 
