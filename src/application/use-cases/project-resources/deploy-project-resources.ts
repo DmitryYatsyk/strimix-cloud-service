@@ -19,8 +19,12 @@ import {
   FACEBOOK_ADS_AD_COSTS_TABLE_SCHEMA,
   TIKTOK_ADS_AD_COSTS_TABLE_SCHEMA,
   TIKTOK_ADS_AD_COSTS_TABLE_ID,
+  RAW_EVENTS_TABLE_SCHEMA,
+  RAW_EVENTS_TABLE_ID,
+  CALCULATE_EVENTS_ATTRIBUTION_TEMPLATE,
+  SCHEDULED_QUERY_CONFIGS,
+  processScheduledQueryTemplate,
 } from '@modules/gcloud/bigquery'
-import { RAW_EVENTS_TABLE_SCHEMA, RAW_EVENTS_TABLE_ID } from '@modules/gcloud/bigquery'
 import {
   BIGQUERY_RAW_EVENTS_SUBSCRIPTION_ID_PREFIX,
   EVENT_COLLECTOR_TOPIC_ID_PREFIX,
@@ -79,49 +83,57 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
         gcloud: {
           project_id: resourceGroup.resources.gcloud_project_id,
           bigquery: {
-            dataset_id: null,
-            dataset_location: null,
-            raw_events_table_id: null,
-            ad_costs_table_id: null,
-            excluded_referrers_table_id: null,
-            identified_events_table_id: null,
+            dataset: { id: null, location: null },
+            tables: {
+              raw_events: null,
+              identified_events: null,
+              excluded_referrers: null,
+              ad_costs: null,
+              facebook_ads_ad_costs: null,
+              google_ads_ad_costs: null,
+              tiktok_ads_ad_costs: null,
+            },
+            scheduled_queries: {
+              calculate_events_attribution: null,
+              facebook_ads_ad_costs_update: null,
+              google_ads_ad_costs_update: null,
+              tiktok_ads_ad_costs_update: null,
+            },
           },
           pubsub: {
-            event_collector_topic_id: null,
-            identity_service_subscription_id: null,
-            bigquery_raw_events_subscription_id: null,
+            topics: { event_collector: null },
+            subscriptions: {
+              bigquery_raw_events: null,
+              identity_service: null,
+            },
           },
         },
-        identification_service: {
-          job_id: null,
-        },
-        data_processing_service: {
-          project_config_id: null,
-        },
+        identification_service: { job_id: null },
+        data_processing_service: { project_config_id: null },
       })
     }
 
+    const gcpProjectId = projectResources.gcloud.project_id
+    const bq = projectResources.gcloud.bigquery
+    const ps = projectResources.gcloud.pubsub
+
     // 4. Create BigQuery API instance
     const bigqueryApi = new BigQueryApi({
-      projectId: projectResources.gcloud.project_id,
+      projectId: gcpProjectId,
       datasetLocation: resourceGroup.resources.gcloud_multi_region_location,
     })
 
     // 5. Create BigQuery Dataset
-    if (!projectResources.gcloud.bigquery.dataset_id) {
-      projectResources.gcloud.bigquery.dataset_id = `sx_${projectId}`
-      projectResources.gcloud.bigquery.dataset_location =
-        resourceGroup.resources.gcloud_multi_region_location
+    if (!bq.dataset.id) {
+      bq.dataset.id = `sx_${projectId}`
+      bq.dataset.location = resourceGroup.resources.gcloud_multi_region_location
 
       // Check if dataset exists
-      const datasetExists = await bigqueryApi.datasetExists(
-        projectResources.gcloud.bigquery.dataset_id,
-      )
-
+      const datasetExists = await bigqueryApi.datasetExists(bq.dataset.id)
       if (!datasetExists) {
         await bigqueryApi.createDataset({
-          projectId: projectResources.gcloud.project_id,
-          datasetId: projectResources.gcloud.bigquery.dataset_id,
+          projectId: gcpProjectId,
+          datasetId: bq.dataset.id,
           location: resourceGroup.resources.gcloud_multi_region_location,
         })
       }
@@ -129,135 +141,108 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 6. Create BigQuery raw events table
-    if (!projectResources.gcloud.bigquery.raw_events_table_id) {
-      const tableId = RAW_EVENTS_TABLE_ID
+    const fullTableId = (tableId: string) => `${gcpProjectId}.${bq.dataset.id}.${tableId}`
 
-      const tableExists = await bigqueryApi.tableExists(
-        projectResources.gcloud.bigquery.dataset_id,
-        tableId,
-      )
+    // 6. Create BigQuery raw events table
+    if (!bq.tables.raw_events) {
+      const tableId = RAW_EVENTS_TABLE_ID
+      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
         await bigqueryApi.createTable({
-          projectId: projectResources.gcloud.project_id,
-          datasetId: projectResources.gcloud.bigquery.dataset_id,
+          projectId: gcpProjectId,
+          datasetId: bq.dataset.id,
           tableId,
           schema: RAW_EVENTS_TABLE_SCHEMA,
-          timePartitioning: {
-            type: 'DAY',
-            field: 'date',
-            requirePartitionFilter: false,
-          },
+          timePartitioning: { type: 'DAY', field: 'date', requirePartitionFilter: false },
         })
       }
 
-      projectResources.gcloud.bigquery.raw_events_table_id = `${projectResources.gcloud.project_id}.${projectResources.gcloud.bigquery.dataset_id}.${tableId}`
+      bq.tables.raw_events = fullTableId(tableId)
       await projectResources.save()
     }
 
     // 7. Create BigQuery identified events table
-    if (!projectResources.gcloud.bigquery.identified_events_table_id) {
+    if (!bq.tables.identified_events) {
       const tableId = IDENTIFIED_EVENTS_TABLE_ID
-
-      const tableExists = await bigqueryApi.tableExists(
-        projectResources.gcloud.bigquery.dataset_id,
-        tableId,
-      )
+      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
         await bigqueryApi.createTable({
-          projectId: projectResources.gcloud.project_id,
-          datasetId: projectResources.gcloud.bigquery.dataset_id,
+          projectId: gcpProjectId,
+          datasetId: bq.dataset.id,
           tableId,
           schema: IDENTIFIED_EVENTS_TABLE_SCHEMA,
-          timePartitioning: {
-            type: 'DAY',
-            field: 'date',
-            requirePartitionFilter: false,
-          },
+          timePartitioning: { type: 'DAY', field: 'date', requirePartitionFilter: false },
         })
       }
 
-      projectResources.gcloud.bigquery.identified_events_table_id = `${projectResources.gcloud.project_id}.${projectResources.gcloud.bigquery.dataset_id}.${tableId}`
+      bq.tables.identified_events = fullTableId(tableId)
       await projectResources.save()
     }
 
-    // 8. Create BigQuery excluded referrers table
-    if (!projectResources.gcloud.bigquery.excluded_referrers_table_id) {
+    // 8. Create BigQuery excluded referrers view
+    if (!bq.tables.excluded_referrers) {
       const viewId = EXCLUDED_REFERRERS_TABLE_ID
-
-      const tableExists = await bigqueryApi.tableExists(
-        projectResources.gcloud.bigquery.dataset_id,
-        viewId,
-      )
+      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, viewId)
       if (!tableExists) {
         await bigqueryApi.createView({
-          projectId: projectResources.gcloud.project_id,
-          datasetId: projectResources.gcloud.bigquery.dataset_id,
+          projectId: gcpProjectId,
+          datasetId: bq.dataset.id,
           viewId,
           query: EXCLUDED_REFERRERS_VIEW_QUERY,
         })
       }
 
-      projectResources.gcloud.bigquery.excluded_referrers_table_id = `${projectResources.gcloud.project_id}.${projectResources.gcloud.bigquery.dataset_id}.${viewId}`
+      bq.tables.excluded_referrers = fullTableId(viewId)
       await projectResources.save()
     }
 
-    // 9. Create BigQuery ad cost table
-    if (!projectResources.gcloud.bigquery.ad_costs_table_id) {
+    // 9. Create BigQuery ad costs table
+    if (!bq.tables.ad_costs) {
       const tableId = AD_COSTS_TABLE_ID
-
-      const tableExists = await bigqueryApi.tableExists(
-        projectResources.gcloud.bigquery.dataset_id,
-        tableId,
-      )
+      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
         await bigqueryApi.createTable({
-          projectId: projectResources.gcloud.project_id,
-          datasetId: projectResources.gcloud.bigquery.dataset_id,
+          projectId: gcpProjectId,
+          datasetId: bq.dataset.id,
           tableId,
           schema: AD_COSTS_TABLE_SCHEMA,
-          timePartitioning: {
-            type: 'DAY',
-            field: 'date',
-            requirePartitionFilter: false,
-          },
+          timePartitioning: { type: 'DAY', field: 'date', requirePartitionFilter: false },
         })
       }
 
-      projectResources.gcloud.bigquery.ad_costs_table_id = `${projectResources.gcloud.project_id}.${projectResources.gcloud.bigquery.dataset_id}.${tableId}`
+      bq.tables.ad_costs = fullTableId(tableId)
       await projectResources.save()
     }
 
     // 10. Create PubSub API instance
-    const pubsubApi = new PubSubApi({ projectId: projectResources.gcloud.project_id })
+    const pubsubApi = new PubSubApi({ projectId: gcpProjectId })
 
-    // 10. Deploy GCloud PubSub Topic
-    if (!projectResources.gcloud.pubsub.event_collector_topic_id) {
+    // 11. Deploy PubSub Topic
+    if (!ps.topics.event_collector) {
       const topicId = `${EVENT_COLLECTOR_TOPIC_ID_PREFIX}_${projectId}`
       const topicExists = await pubsubApi.topicExists(topicId)
       if (!topicExists) {
         await pubsubApi.createTopic({
-          projectId: projectResources.gcloud.project_id,
+          projectId: gcpProjectId,
           topicId,
           messageRetentionDuration: 2678400, // 31 days
         })
       }
 
-      projectResources.gcloud.pubsub.event_collector_topic_id = topicId
+      ps.topics.event_collector = topicId
       await projectResources.save()
     }
 
-    // 11. Deploy GCloud PubSub BigQuery Raw Events Subscription
-    if (!projectResources.gcloud.pubsub.bigquery_raw_events_subscription_id) {
+    // 12. Deploy PubSub BigQuery Raw Events Subscription
+    if (!ps.subscriptions.bigquery_raw_events) {
       const subscriptionId = `${BIGQUERY_RAW_EVENTS_SUBSCRIPTION_ID_PREFIX}_${projectId}`
       const subscriptionExists = await pubsubApi.subscriptionExists(subscriptionId)
-
       if (!subscriptionExists) {
         await pubsubApi.createBigQuerySubscription({
-          projectId: projectResources.gcloud.project_id,
-          topicId: projectResources.gcloud.pubsub.event_collector_topic_id,
+          projectId: gcpProjectId,
+          topicId: ps.topics.event_collector,
           subscriptionId,
-          bigqueryTable: projectResources.gcloud.bigquery.raw_events_table_id,
+          bigqueryTable: bq.tables.raw_events,
           writeMetadata: false,
           useTableSchema: true,
           dropUnknownFields: true,
@@ -269,18 +254,18 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
         })
       }
 
-      projectResources.gcloud.pubsub.bigquery_raw_events_subscription_id = subscriptionId
+      ps.subscriptions.bigquery_raw_events = subscriptionId
       await projectResources.save()
     }
 
-    // 12. Deploy GCloud PubSub Identity Service Subscription
-    if (!projectResources.gcloud.pubsub.identity_service_subscription_id) {
+    // 13. Deploy PubSub Identity Service Subscription
+    if (!ps.subscriptions.identity_service) {
       const subscriptionId = `${IDENTITY_SERVICE_SUBSCRIPTION_ID_PREFIX}_${projectId}`
       const subscriptionExists = await pubsubApi.subscriptionExists(subscriptionId)
       if (!subscriptionExists) {
         await pubsubApi.createPullSubscription({
-          projectId: projectResources.gcloud.project_id,
-          topicId: projectResources.gcloud.pubsub.event_collector_topic_id,
+          projectId: gcpProjectId,
+          topicId: ps.topics.event_collector,
           subscriptionId,
           ackDeadlineSeconds: 60,
           messageRetentionDuration: 2678400, // 31 days
@@ -290,142 +275,143 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
         })
       }
 
-      projectResources.gcloud.pubsub.identity_service_subscription_id = subscriptionId
+      ps.subscriptions.identity_service = subscriptionId
       await projectResources.save()
     }
 
-    // 13.1 Create Facebook Ads ad cost table
-    if (!projectResources.gcloud.bigquery.facebook_ads_ad_costs_table_id) {
+    // 14.1 Create Facebook Ads ad costs table
+    if (!bq.tables.facebook_ads_ad_costs) {
       const tableId = FACEBOOK_ADS_AD_COSTS_TABLE_ID
-      const tableExists = await bigqueryApi.tableExists(
-        projectResources.gcloud.bigquery.dataset_id,
-        tableId,
-      )
-
+      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
         await bigqueryApi.createTable({
-          projectId: projectResources.gcloud.project_id,
-          datasetId: projectResources.gcloud.bigquery.dataset_id,
+          projectId: gcpProjectId,
+          datasetId: bq.dataset.id,
           tableId,
           schema: FACEBOOK_ADS_AD_COSTS_TABLE_SCHEMA,
-          timePartitioning: {
-            type: 'DAY',
-            field: 'date',
-            requirePartitionFilter: false,
-          },
+          timePartitioning: { type: 'DAY', field: 'date', requirePartitionFilter: false },
         })
       }
 
-      projectResources.gcloud.bigquery.facebook_ads_ad_costs_table_id = `${projectResources.gcloud.project_id}.${projectResources.gcloud.bigquery.dataset_id}.${tableId}`
+      bq.tables.facebook_ads_ad_costs = fullTableId(tableId)
       await projectResources.save()
     }
 
-    // 13.2 Create Facebook Ads ad cost update scheduled query
-    const facebookAdsAdCostsUpdateScheduledQueryExists = await bigqueryApi.findScheduledQueryByName(
-      `facebook_ads_ad_costs_update_${projectId}`,
+    // 14.2 Create Facebook Ads ad cost update scheduled query
+    const facebookAdsQueryResult = await bigqueryApi.findScheduledQueryByName(
+      `sx_facebook_ads_ad_costs_update_${projectId}`,
     )
-
-    if (!facebookAdsAdCostsUpdateScheduledQueryExists.exists) {
-      console.log('Creating Facebook Ads ad cost update scheduled query...')
-      // await bigqueryApi.createScheduledQuery({
-      //   datasetId: projectResources.gcloud.bigquery.dataset_id,
-      //   displayName: 'facebook_ads_ad_costs_update',
-      //   query: 'SELECT * FROM `facebook_ads_ad_costs`',
-      // })
+    if (facebookAdsQueryResult.exists) {
+      if (!bq.scheduled_queries.facebook_ads_ad_costs_update) {
+        bq.scheduled_queries.facebook_ads_ad_costs_update = facebookAdsQueryResult.name!
+        await projectResources.save()
+      }
+    } else {
+      // TODO: Create Facebook Ads ad cost update scheduled query
+      console.log('Creating Facebook Ads ad cost update scheduled query')
     }
 
-    // 14.1 Create Google Ads ad cost table
-    if (!projectResources.gcloud.bigquery.google_ads_ad_costs_table_id) {
+    // 15.1 Create Google Ads ad costs table
+    if (!bq.tables.google_ads_ad_costs) {
       const tableId = GOOGLE_ADS_AD_COSTS_TABLE_ID
-      const tableExists = await bigqueryApi.tableExists(
-        projectResources.gcloud.bigquery.dataset_id,
-        tableId,
-      )
-
+      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
         await bigqueryApi.createTable({
-          projectId: projectResources.gcloud.project_id,
-          datasetId: projectResources.gcloud.bigquery.dataset_id,
+          projectId: gcpProjectId,
+          datasetId: bq.dataset.id,
           tableId,
           schema: GOOGLE_ADS_AD_COSTS_TABLE_SCHEMA,
-          timePartitioning: {
-            type: 'DAY',
-            field: 'date',
-            requirePartitionFilter: false,
-          },
+          timePartitioning: { type: 'DAY', field: 'date', requirePartitionFilter: false },
         })
       }
 
-      projectResources.gcloud.bigquery.google_ads_ad_costs_table_id = `${projectResources.gcloud.project_id}.${projectResources.gcloud.bigquery.dataset_id}.${tableId}`
+      bq.tables.google_ads_ad_costs = fullTableId(tableId)
       await projectResources.save()
     }
 
-    // 14.2 Create Google Ads ad cost update scheduled query
-    const googleAdsAdCostsUpdateScheduledQueryExists = await bigqueryApi.findScheduledQueryByName(
-      `google_ads_ad_costs_update_${projectId}`,
+    // 15.2 Create Google Ads ad cost update scheduled query
+    const googleAdsQueryResult = await bigqueryApi.findScheduledQueryByName(
+      `sx_google_ads_ad_costs_update_${projectId}`,
     )
-    if (!googleAdsAdCostsUpdateScheduledQueryExists.exists) {
-      console.log('Creating Google Ads ad cost update scheduled query...')
-      // await bigqueryApi.createScheduledQuery({
-      //   datasetId: projectResources.gcloud.bigquery.dataset_id,
-      //   displayName: 'google_ads_ad_costs_update',
-      //   query: 'SELECT * FROM `google_ads_ad_costs`',
-      // })
+    if (googleAdsQueryResult.exists) {
+      if (!bq.scheduled_queries.google_ads_ad_costs_update) {
+        bq.scheduled_queries.google_ads_ad_costs_update = googleAdsQueryResult.name!
+        await projectResources.save()
+      }
+    } else {
+      // TODO: Create Google Ads ad cost update scheduled query
+      console.log('Creating Google Ads ad cost update scheduled query')
     }
 
-    // 15.1 Create TikTok Ads ad cost table
-    if (!projectResources.gcloud.bigquery.tiktok_ads_ad_costs_table_id) {
+    // 16.1 Create TikTok Ads ad costs table
+    if (!bq.tables.tiktok_ads_ad_costs) {
       const tableId = TIKTOK_ADS_AD_COSTS_TABLE_ID
-      const tableExists = await bigqueryApi.tableExists(
-        projectResources.gcloud.bigquery.dataset_id,
-        tableId,
-      )
-
+      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
         await bigqueryApi.createTable({
-          projectId: projectResources.gcloud.project_id,
-          datasetId: projectResources.gcloud.bigquery.dataset_id,
+          projectId: gcpProjectId,
+          datasetId: bq.dataset.id,
           tableId,
           schema: TIKTOK_ADS_AD_COSTS_TABLE_SCHEMA,
-          timePartitioning: {
-            type: 'DAY',
-            field: 'date',
-            requirePartitionFilter: false,
-          },
+          timePartitioning: { type: 'DAY', field: 'date', requirePartitionFilter: false },
         })
       }
 
-      projectResources.gcloud.bigquery.tiktok_ads_ad_costs_table_id = `${projectResources.gcloud.project_id}.${projectResources.gcloud.bigquery.dataset_id}.${tableId}`
+      bq.tables.tiktok_ads_ad_costs = fullTableId(tableId)
       await projectResources.save()
     }
 
-    // 15.2 Create TikTok Ads ad cost update scheduled query
-    const tiktokAdsAdCostsUpdateScheduledQueryExists = await bigqueryApi.findScheduledQueryByName(
-      `tiktok_ads_ad_costs_update_${projectId}`,
+    // 16.2 Create TikTok Ads ad cost update scheduled query
+    const tiktokAdsQueryResult = await bigqueryApi.findScheduledQueryByName(
+      `sx_tiktok_ads_ad_costs_update_${projectId}`,
     )
-    if (!tiktokAdsAdCostsUpdateScheduledQueryExists.exists) {
-      console.log('Creating TikTok Ads ad cost update scheduled query...')
-      // await bigqueryApi.createScheduledQuery({
-      //   datasetId: projectResources.gcloud.bigquery.dataset_id,
-      //   displayName: 'tiktok_ads_ad_costs_update',
-      //   query: 'SELECT * FROM `tiktok_ads_ad_costs`',
-      // })
+    if (tiktokAdsQueryResult.exists) {
+      if (!bq.scheduled_queries.tiktok_ads_ad_costs_update) {
+        bq.scheduled_queries.tiktok_ads_ad_costs_update = tiktokAdsQueryResult.name!
+        await projectResources.save()
+      }
+    } else {
+      // TODO: Create TikTok Ads ad cost update scheduled query
+      console.log('Creating TikTok Ads ad cost update scheduled query')
     }
 
-    // 16 Create attribution calculation scheduled query
-    const attributionCalculationScheduledQueryExists = await bigqueryApi.findScheduledQueryByName(
-      `attribution_calculation_${projectId}`,
+    // 17. Create attribution calculation scheduled query
+    const attributionConfig = SCHEDULED_QUERY_CONFIGS.calculateEventsAttribution
+    const attributionDisplayName = attributionConfig.displayNamePrefix.replace(
+      '@PROJECT_ID',
+      projectId.toString(),
     )
-    if (!attributionCalculationScheduledQueryExists.exists) {
-      console.log('Creating attribution calculation scheduled query...')
-      // await bigqueryApi.createScheduledQuery({
-      //   datasetId: projectResources.gcloud.bigquery.dataset_id,
-      //   displayName: 'attribution_calculation',
-      //   query: 'SELECT * FROM `attribution_calculation`',
-      // })
+    const attributionQueryResult =
+      await bigqueryApi.findScheduledQueryByName(attributionDisplayName)
+
+    if (attributionQueryResult.exists) {
+      if (!bq.scheduled_queries.calculate_events_attribution) {
+        bq.scheduled_queries.calculate_events_attribution = attributionQueryResult.name!
+        await projectResources.save()
+      }
+    } else {
+      const attributionQuery = processScheduledQueryTemplate(
+        CALCULATE_EVENTS_ATTRIBUTION_TEMPLATE,
+        {
+          projectName: gcpProjectId,
+          datasetName: bq.dataset.id,
+          projectTimezone: projectInfo.timezone,
+        },
+      )
+
+      const created = await bigqueryApi.createScheduledQuery({
+        displayName: attributionDisplayName,
+        query: attributionQuery,
+        schedule: attributionConfig.schedule,
+        location: bq.dataset.location!,
+        startNow: true,
+      })
+
+      bq.scheduled_queries.calculate_events_attribution = created.name
+      await projectResources.save()
     }
 
-    // 16. Create identification job in Identification Service
+    // 18. Create identification job in Identification Service
     let identificationJob = await IdentificationJobRepository.findOne({
       project_id: projectId,
     })
@@ -445,7 +431,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 17. Create project config in data processing service
+    // 19. Create project config in data processing service
     let projectConfig = await DataProcessingServiceProjectConfigRepository.findOne({
       project_id: projectId,
     })
@@ -472,7 +458,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 18. Add project resources to API Gateway DB
+    // 20. Add project resources to API Gateway DB
 
     return
   } catch (error) {

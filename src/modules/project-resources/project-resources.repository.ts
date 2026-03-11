@@ -10,20 +10,34 @@ const ProjectResourcesSchema = new Schema(
     gcloud: {
       project_id: { type: String, default: null },
       bigquery: {
-        dataset_id: { type: String, default: null },
-        dataset_location: { type: String, default: null, enum: ['EU', 'US'] },
-        raw_events_table_id: { type: String, default: null },
-        ad_costs_table_id: { type: String, default: null },
-        excluded_referrers_table_id: { type: String, default: null },
-        identified_events_table_id: { type: String, default: null },
-        facebook_ads_ad_costs_table_id: { type: String, default: null },
-        google_ads_ad_costs_table_id: { type: String, default: null },
-        tiktok_ads_ad_costs_table_id: { type: String, default: null },
+        dataset: {
+          id: { type: String, default: null },
+          location: { type: String, default: null, enum: ['EU', 'US'] },
+        },
+        tables: {
+          raw_events: { type: String, default: null },
+          identified_events: { type: String, default: null },
+          excluded_referrers: { type: String, default: null },
+          ad_costs: { type: String, default: null },
+          facebook_ads_ad_costs: { type: String, default: null },
+          google_ads_ad_costs: { type: String, default: null },
+          tiktok_ads_ad_costs: { type: String, default: null },
+        },
+        scheduled_queries: {
+          calculate_events_attribution: { type: String, default: null },
+          facebook_ads_ad_costs_update: { type: String, default: null },
+          google_ads_ad_costs_update: { type: String, default: null },
+          tiktok_ads_ad_costs_update: { type: String, default: null },
+        },
       },
       pubsub: {
-        event_collector_topic_id: { type: String, default: null },
-        identity_service_subscription_id: { type: String, default: null },
-        bigquery_raw_events_subscription_id: { type: String, default: null },
+        topics: {
+          event_collector: { type: String, default: null },
+        },
+        subscriptions: {
+          bigquery_raw_events: { type: String, default: null },
+          identity_service: { type: String, default: null },
+        },
       },
     },
     identification_service: {

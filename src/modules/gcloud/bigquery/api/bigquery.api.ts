@@ -3,8 +3,10 @@ import type {
   ICreateDatasetParams,
   ICreateTableParams,
   ICreateViewParams,
+  ICreateScheduledQueryParams,
   IDatasetInfo,
   ITableInfo,
+  IScheduledQueryInfo,
   MultiRegionLocation,
 } from '../bigquery.interface'
 import type { CredentialBody } from 'google-auth-library'
@@ -221,50 +223,47 @@ export class BigQueryApi {
     return { exists: false }
   }
 
-  /**
-   * Creates a Scheduled Query (TransferConfig)
-   * @returns Created config info (resource name + configId)
-   */
-  public async createScheduledQuery(params: {
-    datasetId: string
-    displayName: string
-    query: string
-    schedule?: string // e.g. "every 24 hours"
-    destinationTableNameTemplate?: string // e.g. "events_{run_date}"
-    writeDisposition?: 'WRITE_TRUNCATE' | 'WRITE_APPEND' | 'WRITE_EMPTY'
-    partitioningField?: string // optional
-    serviceAccountName?: string // optional: run as SA (recommended in prod)
-    disabled?: boolean
-  }): Promise<{ name: string; configId: string }> {
+  public async createScheduledQuery(
+    params: ICreateScheduledQueryParams,
+  ): Promise<IScheduledQueryInfo> {
     const {
       datasetId,
       displayName,
       query,
-      schedule = 'every 24 hours',
-      destinationTableNameTemplate = 'scheduled_{run_date}',
-      writeDisposition = 'WRITE_TRUNCATE',
-      partitioningField = '',
-      serviceAccountName,
+      schedule,
+      location,
+      startNow = true,
+      endTime,
       disabled = false,
+      serviceAccountName,
     } = params
 
-    const parent = `projects/${this.projectId}/locations/${this.location}`
+    const parent = `projects/${this.projectId}/locations/${location}`
 
-    const transferConfig: any = {
-      destinationDatasetId: datasetId,
+    const transferConfig: Record<string, unknown> = {
       displayName,
       dataSourceId: 'scheduled_query',
       schedule,
       disabled,
       params: {
-        query,
-        destination_table_name_template: destinationTableNameTemplate,
-        write_disposition: writeDisposition,
-        partitioning_field: partitioningField, // empty string = no partitioning
+        fields: {
+          query: { stringValue: query },
+        },
       },
     }
 
-    const request: any = { parent, transferConfig }
+    if (datasetId != null) {
+      transferConfig.destinationDatasetId = datasetId
+    }
+
+    if (!startNow || endTime) {
+      const scheduleOptions: Record<string, unknown> = {}
+      if (!startNow) scheduleOptions.disableAutoScheduling = true
+      if (endTime) scheduleOptions.endTime = { seconds: Math.floor(endTime.getTime() / 1000) }
+      transferConfig.scheduleOptions = scheduleOptions
+    }
+
+    const request: Record<string, unknown> = { parent, transferConfig }
     if (serviceAccountName) request.serviceAccountName = serviceAccountName
 
     const [config] = await this.bqTransfer.createTransferConfig(request)
@@ -272,6 +271,6 @@ export class BigQueryApi {
     const name = config.name as string
     const configId = name.split('/').pop() as string
 
-    return { name, configId }
+    return { name, configId, displayName: config.displayName as string }
   }
 }

@@ -4,20 +4,34 @@ export interface IProjectResources {
   gcloud: {
     project_id: string
     bigquery: {
-      dataset_id: string | null
-      dataset_location: 'EU' | 'US' | null
-      raw_events_table_id: string | null
-      ad_costs_table_id: string | null
-      excluded_referrers_table_id: string | null
-      identified_events_table_id: string | null
-      facebook_ads_ad_costs_table_id: string | null
-      google_ads_ad_costs_table_id: string | null
-      tiktok_ads_ad_costs_table_id: string | null
+      dataset: {
+        id: string | null
+        location: 'EU' | 'US' | null
+      }
+      tables: {
+        raw_events: string | null
+        identified_events: string | null
+        excluded_referrers: string | null
+        ad_costs: string | null
+        facebook_ads_ad_costs: string | null
+        google_ads_ad_costs: string | null
+        tiktok_ads_ad_costs: string | null
+      }
+      scheduled_queries: {
+        calculate_events_attribution: string | null
+        facebook_ads_ad_costs_update: string | null
+        google_ads_ad_costs_update: string | null
+        tiktok_ads_ad_costs_update: string | null
+      }
     }
     pubsub: {
-      event_collector_topic_id: string | null
-      identity_service_subscription_id: string | null
-      bigquery_raw_events_subscription_id: string | null
+      topics: {
+        event_collector: string | null
+      }
+      subscriptions: {
+        bigquery_raw_events: string | null
+        identity_service: string | null
+      }
     }
   }
   identification_service: {

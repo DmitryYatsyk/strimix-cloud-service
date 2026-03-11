@@ -1,10 +1,8 @@
--------------- WARRING: ESCAPE BACKSLASHED IN REQUEST STRINGS -----------
-
 begin
 
-declare _project_name string default 'GCP_PROJECT_NAME_HERE';
-declare _dataset_name string default 'GPC_BQ_DATASET_NAME_HERE';
-declare _project_timezone string default '"PROJECT_TIMEZONE_HERE"';
+declare _project_name string default '@GCP_PROJECT_NAME';
+declare _dataset_name string default '@GPC_BQ_DATASET_NAME';
+declare _project_timezone string default '"@PROJECT_TIMEZONE"';
 
 create temporary function decode_uri_component(path string)
 returns string
@@ -32,8 +30,8 @@ create temp table `bot_ip` as(
   from `<project_name>.<dataset_name>.identified_events`
   where
   -- Exclude events by bot network number
-  regexp_extract(device_info.ip, r'^(\\d+\\.\\d+\\.\\d+)') in 
-    (select distinct(regexp_extract(ip, r'^(\\d+\\.\\d+\\.\\d+)')) from `bi-200.service_eu.web_bots_list`
+  regexp_extract(device_info.ip, r'^(\\\\d+\\\\.\\\\d+\\\\.\\\\d+)') in 
+    (select distinct(regexp_extract(ip, r'^(\\\\d+\\\\.\\\\d+\\\\.\\\\d+)')) from `bi-200.service_eu.web_bots_list`
     where bot like '%facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)%'
     or bot like '%Googlebot%'
     /*or bot like '%YandexBot%' - Temporary disable - needs more clean bot IP list*/

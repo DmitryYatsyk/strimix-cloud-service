@@ -3,10 +3,21 @@ export type {
   ICreateDatasetParams,
   ICreateTableParams,
   ICreateViewParams,
+  ICreateScheduledQueryParams,
   IDatasetInfo,
   ITableInfo,
+  IScheduledQueryInfo,
   MultiRegionLocation,
 } from './bigquery.interface'
+export {
+  processScheduledQueryTemplate,
+  CALCULATE_EVENTS_ATTRIBUTION_TEMPLATE,
+  SCHEDULED_QUERY_CONFIGS,
+} from './scheduled-queries/index'
+export type {
+  IScheduledQueryTemplateVariables,
+  IScheduledQueryConfig,
+} from './scheduled-queries/index'
 export { RAW_EVENTS_TABLE_ID } from './schemas/v1/bigquery.raw_events.schema'
 export { RAW_EVENTS_TABLE_SCHEMA } from './schemas/v1/bigquery.raw_events.schema'
 export { IDENTIFIED_EVENTS_TABLE_ID } from './schemas/v1/bigquery.identified_events.schema'

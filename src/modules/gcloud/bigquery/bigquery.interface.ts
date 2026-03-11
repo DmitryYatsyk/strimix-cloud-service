@@ -53,3 +53,23 @@ export interface ITableInfo {
   createdAt?: Date
   type: 'TABLE' | 'VIEW' | 'EXTERNAL'
 }
+
+export interface ICreateScheduledQueryParams {
+  /** Optional. Omit for script queries (BEGIN/END, DML) - scripts cannot have destination table */
+  datasetId?: string
+  displayName: string
+  query: string
+  schedule: string
+  /** BigQuery multi-region location (EU, US) - must match dataset location */
+  location: MultiRegionLocation
+  startNow?: boolean
+  endTime?: Date
+  disabled?: boolean
+  serviceAccountName?: string
+}
+
+export interface IScheduledQueryInfo {
+  name: string
+  configId: string
+  displayName: string
+}
