@@ -11,4 +11,19 @@ export const SCHEDULED_QUERY_CONFIGS = {
     templateName: 'calculate-events-attribution',
     schedule: 'every 6 hours',
   },
+  facebookAdsAdCostsUpdate: {
+    displayNamePrefix: 'sx_@PROJECT_ID_facebook_ads_ad_costs_update',
+    templateName: 'update-facebook-ads-costs',
+    schedule: 'every 6 hours',
+  },
+  googleAdsAdCostsUpdate: {
+    displayNamePrefix: 'sx_@PROJECT_ID_google_ads_ad_costs_update',
+    templateName: 'update-google-ads-costs',
+    schedule: 'every 6 hours',
+  },
+  tiktokAdsAdCostsUpdate: {
+    displayNamePrefix: 'sx_@PROJECT_ID_tiktok_ads_ad_costs_update',
+    templateName: 'update-tiktok-ads-costs',
+    schedule: 'every 6 hours',
+  },
 } as const

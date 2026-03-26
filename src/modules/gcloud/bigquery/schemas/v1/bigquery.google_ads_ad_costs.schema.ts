@@ -14,6 +14,13 @@ export const GOOGLE_ADS_AD_COSTS_TABLE_SCHEMA = [
   { name: 'landing_page_url', type: 'STRING' },
   { name: 'landing_hostname', type: 'STRING' },
   { name: 'landing_page_path', type: 'STRING' },
+  { name: 'campaign_id', type: 'STRING' },
+  { name: 'campaign_name', type: 'STRING' },
+  { name: 'adgroup_id', type: 'STRING' },
+  { name: 'adgroup_name', type: 'STRING' },
+  { name: 'ad_id', type: 'STRING' },
+  { name: 'ad_name', type: 'STRING' },
+  { name: 'keyword', type: 'STRING' },
   {
     name: 'url_params',
     type: 'RECORD',
@@ -33,6 +40,4 @@ export const GOOGLE_ADS_AD_COSTS_TABLE_SCHEMA = [
   { name: 'reach', type: 'INTEGER' },
   { name: 'clicks', type: 'INTEGER' },
   { name: 'click_delay', type: 'BOOLEAN' },
-  { name: 'ad_id', type: 'STRING' },
-  { name: 'keyword', type: 'STRING' },
 ]

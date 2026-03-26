@@ -41,14 +41,29 @@ insert into `<project_name>.<dataset_name>.ad_costs` (
   clicks,
   click_delay,
   data_source,
-  ad_id
+  campaign_id,
+  campaign_name,
+  adgroup_id,
+  adgroup_name,
+  ad_id,
+  ad_name,
+  creative_image_url
 )
 
 with 
 -- Create match keys by date, utms, ad_id
 source_match_keys as (
   select
-    concat(cast(date as string), ad_account_id, ifnull(trim(source), '_'), ifnull(trim(medium), '_'), ifnull(trim(campaign), '_'), ifnull(trim(content), '_'), ifnull(trim(term), '_'), ifnull(trim(strimix_refid), '_'), ad_id) match_key,
+    concat(
+      cast(date as string),
+      ad_account_id,
+      ifnull(trim(source), '_'),
+      ifnull(trim(medium), '_'),
+      ifnull(trim(campaign), '_'),
+      ifnull(trim(content), '_'),
+      ifnull(trim(term), '_'),
+      ifnull(trim(strimix_refid), '_')
+    , ad_id) match_key,
     *
   from `<project_name>.<dataset_name>.facebook_ads_ad_costs`
 ), 
@@ -107,7 +122,7 @@ latest_matched_rows as (
 latest_matched_rows_grouped as (
   select * from latest_matched_rows
   where last_row is not null
-  group by match_key, date, ad_account_id, source, medium, campaign, content, term, strimix_refid, ad_id, last_row
+  group by match_key, date, ad_account_id, source, medium, campaign, content, term, strimix_refid, last_row, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, creative_image_url
 ),
 
 -- Saturate ad costs by utms
@@ -132,7 +147,13 @@ rows_with_actual_utms as (
     b.clicks, 
     b.click_delay, 
     'FACEBOOK_ADS' data_source,
-    c.ad_id
+    b.campaign_id,
+    b.campaign_name,
+    b.adset_id,
+    b.adset_name,
+    b.ad_id,
+    b.ad_name,
+    b.creative_image_url
   from latest_matched_rows_grouped c
   inner join ordered_match_keys b
   on b.row_number = c.last_row
@@ -141,7 +162,32 @@ rows_with_actual_utms as (
 
 -- Saturate ad costs by actual metric values
 ad_costs as (
-  select d.date, d.source, d.medium, d.campaign, d.content, d.term, d.strimix_refid, d.landing_page_url, d.landing_hostname, d.landing_page_path, b.url_params, d.cost, d.currency, d.impressions, d.reach, d.clicks, d.click_delay, d.data_source, d.ad_id
+  select 
+    d.date,
+    d.source,
+    d.medium,
+    d.campaign,
+    d.content,
+    d.term,
+    d.strimix_refid,
+    d.landing_page_url,
+    d.landing_hostname,
+    d.landing_page_path,
+    b.url_params,
+    d.cost,
+    d.currency,
+    d.impressions,
+    d.reach,
+    d.clicks,
+    d.click_delay,
+    d.data_source,
+    d.campaign_id,
+    d.campaign_name,
+    d.adset_id adgroup_id,
+    d.adset_name adgroup_name,
+    d.ad_id,
+    d.ad_name,
+    d.creative_image_url
   from rows_with_actual_utms d
   left join ordered_match_keys b
   on b.row_number = d.row_number

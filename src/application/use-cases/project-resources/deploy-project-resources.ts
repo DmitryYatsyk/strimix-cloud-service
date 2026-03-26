@@ -32,6 +32,7 @@ import {
   PubSubApi,
 } from '@modules/gcloud/pubsub'
 import { ProjectConfigRepository as DataProcessingServiceProjectConfigRepository } from '@modules/data-processing-service/project-config'
+import { UPDATE_FACEBOOK_ADS_AD_COSTS_TEMPLATE } from '@modules/gcloud/bigquery/scheduled-queries/templates'
 
 const deployProjectResources = async (projectId: number, resourceGroupId: string) => {
   try {
@@ -76,6 +77,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     // 3. Check if project has resources group
     let projectResources = await ProjectResourcesRepository.findOne({ project_id: projectId })
     if (!projectResources) {
+      console.log('Project resources not found, creating project resources...')
       // Create project resources
       projectResources = await ProjectResourcesRepository.create({
         project_id: projectId,
@@ -131,6 +133,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       // Check if dataset exists
       const datasetExists = await bigqueryApi.datasetExists(bq.dataset.id)
       if (!datasetExists) {
+        console.log('BigQuery dataset not found, creating dataset...')
         await bigqueryApi.createDataset({
           projectId: gcpProjectId,
           datasetId: bq.dataset.id,
@@ -148,6 +151,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       const tableId = RAW_EVENTS_TABLE_ID
       const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
+        console.log('BigQuery raw events table not found, creating table...')
         await bigqueryApi.createTable({
           projectId: gcpProjectId,
           datasetId: bq.dataset.id,
@@ -166,6 +170,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       const tableId = IDENTIFIED_EVENTS_TABLE_ID
       const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
+        console.log('BigQuery identified events table not found, creating table...')
         await bigqueryApi.createTable({
           projectId: gcpProjectId,
           datasetId: bq.dataset.id,
@@ -184,6 +189,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       const viewId = EXCLUDED_REFERRERS_TABLE_ID
       const tableExists = await bigqueryApi.tableExists(bq.dataset.id, viewId)
       if (!tableExists) {
+        console.log('BigQuery excluded referrers view not found, creating view...')
         await bigqueryApi.createView({
           projectId: gcpProjectId,
           datasetId: bq.dataset.id,
@@ -201,6 +207,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       const tableId = AD_COSTS_TABLE_ID
       const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
+        console.log('BigQuery ad costs table not found, creating table...')
         await bigqueryApi.createTable({
           projectId: gcpProjectId,
           datasetId: bq.dataset.id,
@@ -222,6 +229,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       const topicId = `${EVENT_COLLECTOR_TOPIC_ID_PREFIX}_${projectId}`
       const topicExists = await pubsubApi.topicExists(topicId)
       if (!topicExists) {
+        console.log('PubSub topic not found, creating topic...')
         await pubsubApi.createTopic({
           projectId: gcpProjectId,
           topicId,
@@ -238,6 +246,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       const subscriptionId = `${BIGQUERY_RAW_EVENTS_SUBSCRIPTION_ID_PREFIX}_${projectId}`
       const subscriptionExists = await pubsubApi.subscriptionExists(subscriptionId)
       if (!subscriptionExists) {
+        console.log('PubSub BigQuery Raw Events subscription not found, creating subscription...')
         await pubsubApi.createBigQuerySubscription({
           projectId: gcpProjectId,
           topicId: ps.topics.event_collector,
@@ -263,6 +272,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       const subscriptionId = `${IDENTITY_SERVICE_SUBSCRIPTION_ID_PREFIX}_${projectId}`
       const subscriptionExists = await pubsubApi.subscriptionExists(subscriptionId)
       if (!subscriptionExists) {
+        console.log('PubSub Identity Service subscription not found, creating subscription...')
         await pubsubApi.createPullSubscription({
           projectId: gcpProjectId,
           topicId: ps.topics.event_collector,
@@ -284,6 +294,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       const tableId = FACEBOOK_ADS_AD_COSTS_TABLE_ID
       const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
+        console.log('Facebook Ads ad costs table not found, creating table...')
         await bigqueryApi.createTable({
           projectId: gcpProjectId,
           datasetId: bq.dataset.id,
@@ -298,17 +309,40 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     }
 
     // 14.2 Create Facebook Ads ad cost update scheduled query
-    const facebookAdsQueryResult = await bigqueryApi.findScheduledQueryByName(
-      `sx_facebook_ads_ad_costs_update_${projectId}`,
+    const facebookAdsConfig = SCHEDULED_QUERY_CONFIGS.facebookAdsAdCostsUpdate
+    const facebookAdsDisplayName = facebookAdsConfig.displayNamePrefix.replace(
+      '@PROJECT_ID',
+      projectId.toString(),
     )
+    const facebookAdsQueryResult =
+      await bigqueryApi.findScheduledQueryByName(facebookAdsDisplayName)
+
     if (facebookAdsQueryResult.exists) {
       if (!bq.scheduled_queries.facebook_ads_ad_costs_update) {
         bq.scheduled_queries.facebook_ads_ad_costs_update = facebookAdsQueryResult.name!
         await projectResources.save()
       }
     } else {
-      // TODO: Create Facebook Ads ad cost update scheduled query
-      console.log('Creating Facebook Ads ad cost update scheduled query')
+      console.log('Creating Facebook Ads ad cost update scheduled query...')
+      const facebookAdsQuery = processScheduledQueryTemplate(
+        UPDATE_FACEBOOK_ADS_AD_COSTS_TEMPLATE,
+        {
+          projectName: gcpProjectId,
+          datasetName: bq.dataset.id,
+          projectTimezone: projectInfo.timezone,
+        },
+      )
+
+      const created = await bigqueryApi.createScheduledQuery({
+        displayName: facebookAdsDisplayName,
+        query: facebookAdsQuery,
+        schedule: facebookAdsConfig.schedule,
+        location: bq.dataset.location!,
+        startNow: true,
+      })
+
+      bq.scheduled_queries.facebook_ads_ad_costs_update = created.name
+      await projectResources.save()
     }
 
     // 15.1 Create Google Ads ad costs table
@@ -316,6 +350,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       const tableId = GOOGLE_ADS_AD_COSTS_TABLE_ID
       const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
+        console.log('Google Ads ad costs table not found, creating table...')
         await bigqueryApi.createTable({
           projectId: gcpProjectId,
           datasetId: bq.dataset.id,
@@ -340,7 +375,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       }
     } else {
       // TODO: Create Google Ads ad cost update scheduled query
-      console.log('Creating Google Ads ad cost update scheduled query')
+      console.log('Creating Google Ads ad cost update scheduled query...')
     }
 
     // 16.1 Create TikTok Ads ad costs table
@@ -348,6 +383,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       const tableId = TIKTOK_ADS_AD_COSTS_TABLE_ID
       const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
+        console.log('TikTok Ads ad costs table not found, creating table...')
         await bigqueryApi.createTable({
           projectId: gcpProjectId,
           datasetId: bq.dataset.id,
@@ -372,7 +408,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       }
     } else {
       // TODO: Create TikTok Ads ad cost update scheduled query
-      console.log('Creating TikTok Ads ad cost update scheduled query')
+      console.log('Creating TikTok Ads ad cost update scheduled query...')
     }
 
     // 17. Create attribution calculation scheduled query
@@ -390,6 +426,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
         await projectResources.save()
       }
     } else {
+      console.log('Creating attribution calculation scheduled query...')
       const attributionQuery = processScheduledQueryTemplate(
         CALCULATE_EVENTS_ATTRIBUTION_TEMPLATE,
         {
@@ -436,6 +473,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       project_id: projectId,
     })
     if (!projectConfig) {
+      console.log('Creating project config in data processing service...')
       projectConfig = await DataProcessingServiceProjectConfigRepository.create({
         project_id: projectId,
         unattributed_events_threshold: 1,
