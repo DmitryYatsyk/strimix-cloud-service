@@ -32,7 +32,12 @@ import {
   PubSubApi,
 } from '@modules/gcloud/pubsub'
 import { ProjectConfigRepository as DataProcessingServiceProjectConfigRepository } from '@modules/data-processing-service/project-config'
-import { UPDATE_FACEBOOK_ADS_AD_COSTS_TEMPLATE } from '@modules/gcloud/bigquery/scheduled-queries/templates'
+import {
+  UPDATE_FACEBOOK_ADS_AD_COSTS_TEMPLATE,
+  UPDATE_GOOGLE_ADS_AD_COSTS_TEMPLATE,
+  UPDATE_TIKTOK_ADS_AD_COSTS_TEMPLATE,
+} from '@modules/gcloud/bigquery/scheduled-queries/templates'
+import axios from 'axios'
 
 const deployProjectResources = async (projectId: number, resourceGroupId: string) => {
   try {
@@ -246,7 +251,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       const subscriptionId = `${BIGQUERY_RAW_EVENTS_SUBSCRIPTION_ID_PREFIX}_${projectId}`
       const subscriptionExists = await pubsubApi.subscriptionExists(subscriptionId)
       if (!subscriptionExists) {
-        console.log('PubSub BigQuery Raw Events subscription not found, creating subscription...')
+        console.log('PubSub BigQuery raw events subscription not found, creating subscription...')
         await pubsubApi.createBigQuerySubscription({
           projectId: gcpProjectId,
           topicId: ps.topics.event_collector,
@@ -272,7 +277,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       const subscriptionId = `${IDENTITY_SERVICE_SUBSCRIPTION_ID_PREFIX}_${projectId}`
       const subscriptionExists = await pubsubApi.subscriptionExists(subscriptionId)
       if (!subscriptionExists) {
-        console.log('PubSub Identity Service subscription not found, creating subscription...')
+        console.log('PubSub identity service subscription not found, creating subscription...')
         await pubsubApi.createPullSubscription({
           projectId: gcpProjectId,
           topicId: ps.topics.event_collector,
@@ -316,7 +321,6 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     )
     const facebookAdsQueryResult =
       await bigqueryApi.findScheduledQueryByName(facebookAdsDisplayName)
-
     if (facebookAdsQueryResult.exists) {
       if (!bq.scheduled_queries.facebook_ads_ad_costs_update) {
         bq.scheduled_queries.facebook_ads_ad_costs_update = facebookAdsQueryResult.name!
@@ -365,17 +369,35 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     }
 
     // 15.2 Create Google Ads ad cost update scheduled query
-    const googleAdsQueryResult = await bigqueryApi.findScheduledQueryByName(
-      `sx_google_ads_ad_costs_update_${projectId}`,
+    const googleAdsConfig = SCHEDULED_QUERY_CONFIGS.googleAdsAdCostsUpdate
+    const googleAdsDisplayName = googleAdsConfig.displayNamePrefix.replace(
+      '@PROJECT_ID',
+      projectId.toString(),
     )
+    const googleAdsQueryResult = await bigqueryApi.findScheduledQueryByName(googleAdsDisplayName)
     if (googleAdsQueryResult.exists) {
       if (!bq.scheduled_queries.google_ads_ad_costs_update) {
         bq.scheduled_queries.google_ads_ad_costs_update = googleAdsQueryResult.name!
         await projectResources.save()
       }
     } else {
-      // TODO: Create Google Ads ad cost update scheduled query
       console.log('Creating Google Ads ad cost update scheduled query...')
+      const googleAdsQuery = processScheduledQueryTemplate(UPDATE_GOOGLE_ADS_AD_COSTS_TEMPLATE, {
+        projectName: gcpProjectId,
+        datasetName: bq.dataset.id,
+        projectTimezone: projectInfo.timezone,
+      })
+
+      const created = await bigqueryApi.createScheduledQuery({
+        displayName: googleAdsDisplayName,
+        query: googleAdsQuery,
+        schedule: googleAdsConfig.schedule,
+        location: bq.dataset.location!,
+        startNow: true,
+      })
+
+      bq.scheduled_queries.google_ads_ad_costs_update = created.name
+      await projectResources.save()
     }
 
     // 16.1 Create TikTok Ads ad costs table
@@ -398,17 +420,36 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     }
 
     // 16.2 Create TikTok Ads ad cost update scheduled query
-    const tiktokAdsQueryResult = await bigqueryApi.findScheduledQueryByName(
-      `sx_tiktok_ads_ad_costs_update_${projectId}`,
+    const tiktokAdsConfig = SCHEDULED_QUERY_CONFIGS.tiktokAdsAdCostsUpdate
+    const tiktokAdsDisplayName = tiktokAdsConfig.displayNamePrefix.replace(
+      '@PROJECT_ID',
+      projectId.toString(),
     )
+    const tiktokAdsQueryResult = await bigqueryApi.findScheduledQueryByName(tiktokAdsDisplayName)
+
     if (tiktokAdsQueryResult.exists) {
       if (!bq.scheduled_queries.tiktok_ads_ad_costs_update) {
         bq.scheduled_queries.tiktok_ads_ad_costs_update = tiktokAdsQueryResult.name!
         await projectResources.save()
       }
     } else {
-      // TODO: Create TikTok Ads ad cost update scheduled query
       console.log('Creating TikTok Ads ad cost update scheduled query...')
+      const tiktokAdsQuery = processScheduledQueryTemplate(UPDATE_TIKTOK_ADS_AD_COSTS_TEMPLATE, {
+        projectName: gcpProjectId,
+        datasetName: bq.dataset.id,
+        projectTimezone: projectInfo.timezone,
+      })
+
+      const created = await bigqueryApi.createScheduledQuery({
+        displayName: tiktokAdsDisplayName,
+        query: tiktokAdsQuery,
+        schedule: tiktokAdsConfig.schedule,
+        location: bq.dataset.location!,
+        startNow: true,
+      })
+
+      bq.scheduled_queries.tiktok_ads_ad_costs_update = created.name
+      await projectResources.save()
     }
 
     // 17. Create attribution calculation scheduled query
@@ -419,7 +460,6 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     )
     const attributionQueryResult =
       await bigqueryApi.findScheduledQueryByName(attributionDisplayName)
-
     if (attributionQueryResult.exists) {
       if (!bq.scheduled_queries.calculate_events_attribution) {
         bq.scheduled_queries.calculate_events_attribution = attributionQueryResult.name!
@@ -497,6 +537,35 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
     }
 
     // 20. Add project resources to API Gateway DB
+    const apiGatewayURL =
+      process.env.API_GATEWAY_HOST +
+      '/api/v1/data-provider-for-cloud-service/create-project-dataset-config'
+
+    const config = {
+      method: 'post',
+      url: apiGatewayURL,
+      headers: {
+        'content-type': 'application/json',
+        authorization: process.env.API_GATEWAY_AUTHORIZATION_CODE,
+      },
+      data: {
+        project_id: projectId,
+        stream_id: projectInfo.streamId,
+        gcloud: projectResources.gcloud,
+      },
+    }
+
+    console.log('Adding project datasets config to API Gateway DB...')
+    await axios(config)
+      .then((response) => {
+        return response.data
+      })
+      .catch((e) => {
+        console.log(e)
+        throw new HttpException(ERRORS.OTHER.INTERNAL_SERVER_ERROR)
+      })
+
+    console.log('Project cloud resources deployed successfully!')
 
     return
   } catch (error) {

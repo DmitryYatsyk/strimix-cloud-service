@@ -147,13 +147,13 @@ rows_with_actual_utms as (
     b.clicks, 
     b.click_delay, 
     'FACEBOOK_ADS' data_source,
-    b.campaign_id,
-    b.campaign_name,
-    b.adset_id,
-    b.adset_name,
-    b.ad_id,
-    b.ad_name,
-    b.creative_image_url
+    c.campaign_id,
+    c.campaign_name,
+    c.adset_id,
+    c.adset_name,
+    c.ad_id,
+    c.ad_name,
+    c.creative_image_url
   from latest_matched_rows_grouped c
   inner join ordered_match_keys b
   on b.row_number = c.last_row
