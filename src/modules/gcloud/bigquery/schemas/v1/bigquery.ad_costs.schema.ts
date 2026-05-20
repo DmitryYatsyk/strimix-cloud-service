@@ -2,6 +2,7 @@ export const AD_COSTS_TABLE_ID = 'ad_costs'
 
 export const AD_COSTS_TABLE_SCHEMA = [
   { name: 'date', type: 'DATE' },
+  { name: 'ad_platform', type: 'STRING' },
   { name: 'source', type: 'STRING' },
   { name: 'medium', type: 'STRING' },
   { name: 'campaign', type: 'STRING' },

@@ -24,6 +24,7 @@ execute immediate (query);
 set query_template = """
 insert into `<project_name>.<dataset_name>.ad_costs` (
   date,
+  ad_platform,
   source,
   medium,
   campaign,
@@ -40,6 +41,7 @@ insert into `<project_name>.<dataset_name>.ad_costs` (
 )
 select
   date,
+  'Manual' ad_platform,
   source,
   medium,
   campaign,

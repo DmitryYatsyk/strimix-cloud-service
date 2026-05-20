@@ -24,6 +24,7 @@ execute immediate (query);
 set query_template = """
 insert into `<project_name>.<dataset_name>.ad_costs` (
   date,
+  ad_platform,
   source,
   medium,
   campaign,
@@ -162,6 +163,7 @@ rows_with_actual_utms as (
 ad_costs as (
   select 
     d.date,
+    'TikTok Ads' ad_platform,
     d.source,
     d.medium,
     d.campaign,
