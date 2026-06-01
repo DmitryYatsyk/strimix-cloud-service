@@ -42,13 +42,13 @@ insert into `<project_name>.<dataset_name>.ad_costs` (
   clicks,
   click_delay,
   data_source,
+  ad_destination,
   campaign_id,
   campaign_name,
   adgroup_id,
   adgroup_name,
   ad_id,
-  ad_name,
-  creative_image_url
+  ad_name
 )
 
 with 
@@ -114,7 +114,7 @@ latest_matched_rows as (
       (select i.last_row from ads_with_changed_utms_grouped i where i.match_key = t1.match_key),
       if((select i.last_row from ads_with_changed_utms_grouped i where i.date = t1.date and i.ad_id = t1.ad_id) is null, max(row_number) over(partition by date, ad_id), null)
     ) last_row,
-    * except(row_number, inserted_at, timezone, landing_page_url, landing_hostname, landing_page_path, url_params, cost, currency, impressions, reach, clicks, click_delay) 
+    * except(row_number, inserted_at, timezone, landing_page_url, url_params, cost, currency, impressions, reach, clicks, click_delay) 
   from ordered_match_keys t1
 ),
 
@@ -122,7 +122,7 @@ latest_matched_rows as (
 latest_matched_rows_grouped as (
   select * from latest_matched_rows
   where last_row is not null
-  group by match_key, date, ad_account_id, source, medium, campaign, content, term, strimix_refid, last_row, campaign_id, campaign_name, adgroup_id, adgroup_name, ad_id, ad_name
+  group by match_key, date, ad_account_id, source, medium, campaign, content, term, strimix_refid, last_row, campaign_id, campaign_name, adgroup_id, adgroup_name, ad_id, ad_name, ad_destination
 ),
 
 -- Saturate ad costs by utms
@@ -138,8 +138,8 @@ rows_with_actual_utms as (
     c.term, 
     c.strimix_refid, 
     b.landing_page_url, 
-    b.landing_hostname, 
-    b.landing_page_path,
+    cast(null as string) landing_hostname,
+    cast(null as string) landing_page_path,
     b.cost, 
     b.currency, 
     b.impressions, 
@@ -147,6 +147,7 @@ rows_with_actual_utms as (
     b.clicks, 
     b.click_delay, 
     'TIKTOK_ADS' data_source,
+    c.ad_destination,
     c.campaign_id,
     c.campaign_name,
     c.adgroup_id,
@@ -181,13 +182,13 @@ ad_costs as (
     d.clicks,
     d.click_delay,
     d.data_source,
+    d.ad_destination,
     d.campaign_id,
     d.campaign_name,
     d.adgroup_id,
     d.adgroup_name,
     d.ad_id,
-    d.ad_name,
-    cast(null as string) creative_image_url
+    d.ad_name
   from rows_with_actual_utms d
   left join ordered_match_keys b
   on b.row_number = d.row_number

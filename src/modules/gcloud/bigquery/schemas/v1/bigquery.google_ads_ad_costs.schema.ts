@@ -12,8 +12,6 @@ export const GOOGLE_ADS_AD_COSTS_TABLE_SCHEMA = [
   { name: 'term', type: 'STRING' },
   { name: 'strimix_refid', type: 'STRING' },
   { name: 'landing_page_url', type: 'STRING' },
-  { name: 'landing_hostname', type: 'STRING' },
-  { name: 'landing_page_path', type: 'STRING' },
   { name: 'campaign_id', type: 'STRING' },
   { name: 'campaign_name', type: 'STRING' },
   { name: 'adgroup_id', type: 'STRING' },
@@ -21,6 +19,7 @@ export const GOOGLE_ADS_AD_COSTS_TABLE_SCHEMA = [
   { name: 'ad_id', type: 'STRING' },
   { name: 'ad_name', type: 'STRING' },
   { name: 'keyword', type: 'STRING' },
+  { name: 'ad_destination', type: 'STRING' },
   {
     name: 'url_params',
     type: 'RECORD',
