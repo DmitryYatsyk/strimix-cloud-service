@@ -8,7 +8,7 @@ const ErrorSchema = new Schema(
     type: { type: String, default: null },
     message: { type: String, default: null },
   },
-  { _id: false },
+  { _id: false, default: null },
 )
 
 const ProjectConfigSchema = new Schema(
