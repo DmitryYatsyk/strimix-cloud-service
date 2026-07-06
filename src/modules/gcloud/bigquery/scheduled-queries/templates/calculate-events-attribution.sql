@@ -45,6 +45,91 @@ execute immediate (query);
 
 end;
 
+------------------------------------------------
+------ 1.5 RESOLVE PROFILE MERGE MAPPING -------
+------------------------------------------------
+
+begin
+
+declare query string;
+declare query_template string;
+
+-- Ensure the merge events table exists so the script does not fail
+-- on projects where event-processing-service has not created it yet
+set query_template = """
+create table if not exists `<project_name>.<dataset_name>.profile_merge_events`
+(
+  merge_job_id       string not null,
+  parent_profile_id  string not null,
+  merged_profile_id  string not null,
+  merge_timestamp    int64  not null,
+  date               date   not null,
+  inserted_at        int64  not null
+)
+partition by date
+cluster by merged_profile_id""";
+
+set query = replace(query_template, '<project_name>', _project_name);
+set query = replace(query, '<dataset_name>', _dataset_name);
+
+execute immediate (query);
+
+-- Build "merged (child) profile -> final (canonical) profile" mapping.
+-- Transitive merge chains (a->b, b->c) are resolved to a->c recursively;
+-- depth < 50 protects against cycles in the data
+set query_template = """
+create temp table `profile_id_mapping` as (
+with recursive
+edges as (
+  select
+    merged_profile_id,
+    parent_profile_id,
+    merge_timestamp
+  from `<project_name>.<dataset_name>.profile_merge_events`
+  where merged_profile_id != parent_profile_id
+  -- Deduplicate outbox retries: one actual record per merged profile
+  qualify row_number() over (
+    partition by merged_profile_id
+    order by merge_timestamp desc, merge_job_id desc
+  ) = 1
+),
+
+resolved as (
+  select
+    merged_profile_id,
+    parent_profile_id as canonical_profile_id,
+    1 as depth
+  from edges
+
+  union all
+
+  select
+    r.merged_profile_id,
+    e.parent_profile_id as canonical_profile_id,
+    r.depth + 1 as depth
+  from resolved as r
+  inner join edges as e
+    on e.merged_profile_id = r.canonical_profile_id
+  where r.depth < 50
+)
+
+select
+  merged_profile_id,
+  canonical_profile_id
+from resolved
+qualify row_number() over (
+  partition by merged_profile_id
+  order by depth desc
+) = 1
+)""";
+
+set query = replace(query_template, '<project_name>', _project_name);
+set query = replace(query, '<dataset_name>', _dataset_name);
+
+execute immediate (query);
+
+end;
+
 -------------------------------------------------------------------------------
 ---- 2. DELETE DUPLICATED EVENTS AND RE-IDENTIFY PROFILES AT SESSION LEVEL ----
 -------------------------------------------------------------------------------
@@ -56,12 +141,24 @@ declare query_template string;
 
 set query_template = """
 create temp table `identified_events` as(
-with delete_duplicated_events as (
+-- Apply profile merges before the rest of the pipeline: all downstream
+-- window functions partitioned by profile_id (session re-identification,
+-- visits, attribution) work with canonical profile ids
+with merge_resolved_events as (
+  select
+    e.* replace (coalesce(m.canonical_profile_id, e.profile_id) as profile_id)
+  from `<project_name>.<dataset_name>.identified_events` as e
+  left join `profile_id_mapping` as m
+    on e.profile_id = m.merged_profile_id
+),
+
+delete_duplicated_events as (
   select * except(row_number)
   from (
     select
-      *, row_number() over (partition by event_id) as row_number
-    from `<project_name>.<dataset_name>.identified_events`
+      -- Deterministic dedup: keep the latest inserted row for each event_id
+      *, row_number() over (partition by event_id order by inserted_at desc) as row_number
+    from merge_resolved_events
   )
   where row_number = 1
   -- Exclude bot traffic by User Agent
@@ -989,7 +1086,7 @@ orders_last_info_with_single_attribution_groupped as (
 
 orders_result as (
   select
-    extract(date from timestamp_millis(t1.creation_timestamp) at time zone "Europe/Kiev") date,
+    extract(date from timestamp_millis(t1.creation_timestamp) at time zone <project_timezone>) date,
     t1.id,
     t1.profile_id,
     case when
