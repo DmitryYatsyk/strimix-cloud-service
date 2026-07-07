@@ -15,6 +15,8 @@ import {
   GOOGLE_ADS_AD_COSTS_TABLE_SCHEMA,
   IDENTIFIED_EVENTS_TABLE_ID,
   IDENTIFIED_EVENTS_TABLE_SCHEMA,
+  PROFILE_MERGE_EVENTS_TABLE_ID,
+  PROFILE_MERGE_EVENTS_TABLE_SCHEMA,
   FACEBOOK_ADS_AD_COSTS_TABLE_ID,
   FACEBOOK_ADS_AD_COSTS_TABLE_SCHEMA,
   TIKTOK_ADS_AD_COSTS_TABLE_SCHEMA,
@@ -94,6 +96,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
             tables: {
               raw_events: null,
               identified_events: null,
+              profile_merge_events: null,
               excluded_referrers: null,
               ad_costs: null,
               facebook_ads_ad_costs: null,
@@ -189,7 +192,29 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 8. Create BigQuery excluded referrers view
+    // 8. Create BigQuery profile merge events table
+    if (!bq.tables.profile_merge_events) {
+      const tableId = PROFILE_MERGE_EVENTS_TABLE_ID
+      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
+      if (!tableExists) {
+        console.log('BigQuery profile merge events table not found, creating table...')
+        await bigqueryApi.createTable({
+          projectId: gcpProjectId,
+          datasetId: bq.dataset.id,
+          tableId,
+          schema: PROFILE_MERGE_EVENTS_TABLE_SCHEMA,
+          description:
+            'Profile merge events. Source of truth for profile_id_mapping. Written by event-processing service instead of DML UPDATE.',
+          timePartitioning: { type: 'DAY', field: 'date', requirePartitionFilter: false },
+          clustering: { fields: ['merged_profile_id'] },
+        })
+      }
+
+      bq.tables.profile_merge_events = fullTableId(tableId)
+      await projectResources.save()
+    }
+
+    // 9. Create BigQuery excluded referrers view
     if (!bq.tables.excluded_referrers) {
       const viewId = EXCLUDED_REFERRERS_TABLE_ID
       const tableExists = await bigqueryApi.tableExists(bq.dataset.id, viewId)
@@ -207,7 +232,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 9. Create BigQuery ad costs table
+    // 10. Create BigQuery ad costs table
     if (!bq.tables.ad_costs) {
       const tableId = AD_COSTS_TABLE_ID
       const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
@@ -226,10 +251,10 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 10. Create PubSub API instance
+    // 11. Create PubSub API instance
     const pubsubApi = new PubSubApi({ projectId: gcpProjectId })
 
-    // 11. Deploy PubSub Topic
+    // 12. Deploy PubSub Topic
     if (!ps.topics.event_collector) {
       const topicId = `${EVENT_COLLECTOR_TOPIC_ID_PREFIX}_${projectId}`
       const topicExists = await pubsubApi.topicExists(topicId)
@@ -246,7 +271,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 12. Deploy PubSub BigQuery Raw Events Subscription
+    // 13. Deploy PubSub BigQuery Raw Events Subscription
     if (!ps.subscriptions.bigquery_raw_events) {
       const subscriptionId = `${BIGQUERY_RAW_EVENTS_SUBSCRIPTION_ID_PREFIX}_${projectId}`
       const subscriptionExists = await pubsubApi.subscriptionExists(subscriptionId)
@@ -272,7 +297,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 13. Deploy PubSub Identity Service Subscription
+    // 14. Deploy PubSub Identity Service Subscription
     if (!ps.subscriptions.identity_service) {
       const subscriptionId = `${IDENTITY_SERVICE_SUBSCRIPTION_ID_PREFIX}_${projectId}`
       const subscriptionExists = await pubsubApi.subscriptionExists(subscriptionId)
@@ -294,7 +319,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 14.1 Create Facebook Ads ad costs table
+    // 15.1 Create Facebook Ads ad costs table
     if (!bq.tables.facebook_ads_ad_costs) {
       const tableId = FACEBOOK_ADS_AD_COSTS_TABLE_ID
       const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
@@ -313,7 +338,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 14.2 Create Facebook Ads ad cost update scheduled query
+    // 15.2 Create Facebook Ads ad cost update scheduled query
     const facebookAdsConfig = SCHEDULED_QUERY_CONFIGS.facebookAdsAdCostsUpdate
     const facebookAdsDisplayName = facebookAdsConfig.displayNamePrefix.replace(
       '@PROJECT_ID',
@@ -349,7 +374,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 15.1 Create Google Ads ad costs table
+    // 16.1 Create Google Ads ad costs table
     if (!bq.tables.google_ads_ad_costs) {
       const tableId = GOOGLE_ADS_AD_COSTS_TABLE_ID
       const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
@@ -368,7 +393,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 15.2 Create Google Ads ad cost update scheduled query
+    // 16.2 Create Google Ads ad cost update scheduled query
     const googleAdsConfig = SCHEDULED_QUERY_CONFIGS.googleAdsAdCostsUpdate
     const googleAdsDisplayName = googleAdsConfig.displayNamePrefix.replace(
       '@PROJECT_ID',
@@ -400,7 +425,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 16.1 Create TikTok Ads ad costs table
+    // 17.1 Create TikTok Ads ad costs table
     if (!bq.tables.tiktok_ads_ad_costs) {
       const tableId = TIKTOK_ADS_AD_COSTS_TABLE_ID
       const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
@@ -419,7 +444,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 16.2 Create TikTok Ads ad cost update scheduled query
+    // 17.2 Create TikTok Ads ad cost update scheduled query
     const tiktokAdsConfig = SCHEDULED_QUERY_CONFIGS.tiktokAdsAdCostsUpdate
     const tiktokAdsDisplayName = tiktokAdsConfig.displayNamePrefix.replace(
       '@PROJECT_ID',
@@ -452,7 +477,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 17. Create attribution calculation scheduled query
+    // 18. Create attribution calculation scheduled query
     const attributionConfig = SCHEDULED_QUERY_CONFIGS.calculateEventsAttribution
     const attributionDisplayName = attributionConfig.displayNamePrefix.replace(
       '@PROJECT_ID',
@@ -488,7 +513,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 18. Create identification job in Identification Service
+    // 19. Create identification job in Identification Service
     let identificationJob = await IdentificationJobRepository.findOne({
       project_id: projectId,
     })
@@ -508,7 +533,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 19. Create project config in data processing service
+    // 20. Create project config in data processing service
     let projectConfig = await DataProcessingServiceProjectConfigRepository.findOne({
       project_id: projectId,
     })
@@ -536,7 +561,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 20. Add project resources to API Gateway DB
+    // 21. Add project resources to API Gateway DB
     const apiGatewayURL =
       process.env.API_GATEWAY_HOST +
       '/api/v1/data-provider-for-cloud-service/create-project-dataset-config'

@@ -17,6 +17,7 @@ const ProjectResourcesSchema = new Schema(
         tables: {
           raw_events: { type: String, default: null },
           identified_events: { type: String, default: null },
+          profile_merge_events: { type: String, default: null },
           excluded_referrers: { type: String, default: null },
           ad_costs: { type: String, default: null },
           facebook_ads_ad_costs: { type: String, default: null },

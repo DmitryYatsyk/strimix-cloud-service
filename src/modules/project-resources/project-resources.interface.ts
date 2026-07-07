@@ -11,6 +11,7 @@ export interface IProjectResources {
       tables: {
         raw_events: string | null
         identified_events: string | null
+        profile_merge_events: string | null
         excluded_referrers: string | null
         ad_costs: string | null
         facebook_ads_ad_costs: string | null

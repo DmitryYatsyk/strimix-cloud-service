@@ -33,3 +33,5 @@ export { GOOGLE_ADS_AD_COSTS_TABLE_ID } from './schemas/v1/bigquery.google_ads_a
 export { GOOGLE_ADS_AD_COSTS_TABLE_SCHEMA } from './schemas/v1/bigquery.google_ads_ad_costs.schema'
 export { TIKTOK_ADS_AD_COSTS_TABLE_ID } from './schemas/v1/bigquery.tiktok_ads_ad_costs.schema'
 export { TIKTOK_ADS_AD_COSTS_TABLE_SCHEMA } from './schemas/v1/bigquery.tiktok_ads_ad_costs.schema'
+export { PROFILE_MERGE_EVENTS_TABLE_ID } from './schemas/v1/bigquery.profile_merge_events.schema'
+export { PROFILE_MERGE_EVENTS_TABLE_SCHEMA } from './schemas/v1/bigquery.profile_merge_events.schema'
