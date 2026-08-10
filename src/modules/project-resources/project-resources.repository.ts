@@ -23,8 +23,12 @@ const ProjectResourcesSchema = new Schema(
           facebook_ads_ad_costs: { type: String, default: null },
           google_ads_ad_costs: { type: String, default: null },
           tiktok_ads_ad_costs: { type: String, default: null },
+          traffic_rules: { type: String, default: null },
+          attribution_signal_mappings: { type: String, default: null },
+          excluded_url_params: { type: String, default: null },
         },
         scheduled_queries: {
+          update_costs_and_calculate_attribution: { type: String, default: null },
           calculate_events_attribution: { type: String, default: null },
           facebook_ads_ad_costs_update: { type: String, default: null },
           google_ads_ad_costs_update: { type: String, default: null },

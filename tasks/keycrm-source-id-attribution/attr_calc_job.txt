@@ -1,8 +1,8 @@
 begin
 
-declare _project_name string default '@GCP_PROJECT_NAME';
-declare _dataset_name string default '@GPC_BQ_DATASET_NAME';
-declare _project_timezone string default '"@PROJECT_TIMEZONE"';
+declare _project_name string default 'strimix-clients';
+declare _dataset_name string default 'sx_7905';
+declare _project_timezone string default '"Europe/Kyiv"';
 
 create temporary function decode_uri_component(path string)
 returns string
@@ -208,6 +208,489 @@ set query = replace(query_template, '<project_name>', _project_name);
 set query = replace(query, '<dataset_name>', _dataset_name);
 
 execute immediate (query);
+
+end;
+
+--------------------------------------------------------------------------
+--------- 2.5 ADD SYNTHETIC INSTAGRAM PAGE_VIEW EVENTS ------------------
+--------------------------------------------------------------------------
+
+begin
+
+declare query string;
+declare query_template string;
+
+-- 1. Create synthetic identified events
+set query_template = """
+create temp table `synthetic_instagram_identified_events` as (
+with instagram_leads as (
+  select
+    *,
+    (
+      select cp.value.int_value
+      from unnest(custom_params) cp
+      where cp.key = 'keycrm_entity_created_at'
+        and cp.value.int_value > 0
+    ) - 1000 as synthetic_timestamp, -- Subtract 1 second to generate the previous synthetic page_view event
+
+    extract(
+      date from timestamp_millis(
+        (
+          select cp.value.int_value
+          from unnest(custom_params) cp
+          where cp.key = 'keycrm_entity_created_at'
+            and cp.value.int_value > 0
+        )
+      ) at time zone <project_timezone>
+    ) as lead_created_date,
+
+    (
+      select cp.value.string_value
+      from unnest(custom_params) cp
+      where cp.key = 'keycrm_manager_comment'
+    ) as keycrm_manager_comment
+
+  from `<project_name>.<dataset_name>.orders`
+  where 1 = 1
+    and (
+      select cp.value.string_value
+      from unnest(custom_params) cp
+      where cp.key = 'keycrm_source_alias'
+    ) = 'instagram'
+
+    and (
+      select cp.value.string_value
+      from unnest(custom_params) cp
+      where cp.key = 'keycrm_manager_comment'
+    ) is not null
+
+    and (
+      select cp.value.int_value
+      from unnest(custom_params) cp
+      where cp.key = 'keycrm_entity_created_at'
+        and cp.value.int_value > 0
+    ) > 0
+),
+
+/*
+  First, deduplicate Meta ads at the raw mapping level.
+
+  This produces one row per:
+  date + ad_name + ad_id + campaign_name + adgroup_name
+
+  We intentionally do this before counting mappings, because using
+  COUNT(DISTINCT ad_id) may fail in BigQuery in some nested aggregation/view scenarios.
+*/
+meta_ad_deduplicated as (
+  select
+    date,
+    ad_name,
+    ad_id,
+    campaign_name,
+    adgroup_name,
+    source,
+    medium,
+    campaign,
+    content,
+    term,
+    strimix_refid,
+  from `<project_name>.<dataset_name>.ad_costs`
+  where 1 = 1
+    and data_source = 'FACEBOOK_ADS'
+    and ad_destination = 'chat'
+    and ad_name is not null
+    and ad_id is not null
+  group by
+    date,
+    ad_name,
+    ad_id,
+    campaign_name,
+    adgroup_name,
+    source,
+    medium,
+    campaign,
+    content,
+    term,
+    strimix_refid
+),
+
+/*
+  Keep only mappings where:
+  date + ad_name
+  maps to exactly one ad_id / campaign / adset combination.
+
+  If the same ad_name has multiple ad_id values on the same date,
+  the mapping is excluded to avoid duplicating synthetic page_view events.
+*/
+unique_meta_ad_names as (
+  select
+    date,
+    ad_name,
+    max(ad_id) as ad_id,
+    max(campaign_name) as campaign_name,
+    max(adgroup_name) as adgroup_name,
+    max(source) as source,
+    max(medium) as medium,
+    max(campaign) as campaign,
+    max(content) as content,
+    max(term) as term,
+    max(strimix_refid) as strimix_refid,
+  from meta_ad_deduplicated
+  group by
+    date,
+    ad_name
+  having count(*) = 1
+),
+
+meta_ad_ids as (
+  select
+    t2.id as lead_id,
+    t2.profile_id,
+    t2.synthetic_timestamp,
+    t1.ad_id,
+    t1.campaign_name,
+    t1.ad_name,
+    t1.adgroup_name,
+    t1.source,
+    t1.medium,
+    t1.campaign,
+    t1.content,
+    t1.term,
+    t1.strimix_refid,
+  from unique_meta_ad_names t1
+  inner join instagram_leads t2
+    on t1.date = t2.lead_created_date
+    and t1.ad_name = t2.keycrm_manager_comment
+),
+
+synthetic_events as (
+  select
+    extract(date from timestamp_millis(t1.synthetic_timestamp) at time zone <project_timezone>) as date,
+
+    t1.synthetic_timestamp as timestamp,
+
+    to_hex(md5(concat(
+      'synthetic_instagram_page_view:',
+      cast(t1.lead_id as string),
+      ':',
+      cast(t1.synthetic_timestamp as string),
+      ':',
+      cast(t1.strimix_refid as string)
+    ))) as event_id,
+
+    'page_view' as event_name,
+
+    [
+      struct(
+        'page_location' as key,
+        struct('https://site.com?_is_synthetic_event=1' as string_value, cast(null as int64) as int_value, cast(null as float64) as double_value, cast(null as bool) as boolean_value) as value
+      ),
+      struct(
+        'page_referrer' as key,
+        struct(cast(null as string) as string_value, cast(null as int64) as int_value, cast(null as float64) as double_value, cast(null as bool) as boolean_value) as value
+      ),
+      struct(
+        'source' as key,
+        struct(t1.source as string_value, cast(null as int64) as int_value, cast(null as float64) as double_value, cast(null as bool) as boolean_value) as value
+      ),
+      struct(
+        'medium' as key,
+        struct(t1.medium as string_value, cast(null as int64) as int_value, cast(null as float64) as double_value, cast(null as bool) as boolean_value) as value
+      ),
+      struct(
+        'campaign' as key,
+        struct(t1.campaign as string_value, cast(null as int64) as int_value, cast(null as float64) as double_value, cast(null as bool) as boolean_value) as value
+      ),
+      struct(
+        'content' as key,
+        struct(t1.content as string_value, cast(null as int64) as int_value, cast(null as float64) as double_value, cast(null as bool) as boolean_value) as value
+      ),
+      struct(
+        'term' as key,
+        struct(t1.term as string_value, cast(null as int64) as int_value, cast(null as float64) as double_value, cast(null as bool) as boolean_value) as value
+      ),
+      struct(
+        'strimix_refid' as key,
+        struct(t1.strimix_refid as string_value, cast(null as int64) as int_value, cast(null as float64) as double_value, cast(null as bool) as boolean_value) as value
+      )
+    ] as event_params,
+
+    struct(
+      cast(null as string) as first_name,
+      cast(null as string) as last_name,
+      cast(null as string) as full_name,
+      cast(null as string) as gender,
+      cast(null as int64) as age,
+      cast(null as string) as phone_number,
+      cast(null as string) as email,
+      cast(null as string) as country,
+      cast(null as string) as region,
+      cast(null as string) as city
+    ) as user_data,
+
+    cast([] as array<
+      struct<
+        key string,
+        value struct<
+          string_value string,
+          int_value int64,
+          double_value float64,
+          boolean_value bool
+        >
+      >
+    >) as user_properties,
+
+    cast([] as array<
+      struct<
+        key string,
+        value string
+      >
+    >) as user_external_ids,
+
+    t1.profile_id,
+
+    cast(null as string) as strimix_avid,
+
+    cast([] as array<
+      struct<
+        ad_network string,
+        values array<
+          struct<
+            key string,
+            value string
+          >
+        >
+      >
+    >) as ad_data,
+
+    cast(null as struct<
+      id string,
+      status string,
+      manager string,
+      value float64,
+      paid_value float64,
+      refund_value float64,
+      currency string,
+      promo_action string,
+      discount_amount float64,
+      discount_percentage float64,
+      payment_method string,
+      custom_params array<
+        struct<
+          key string,
+          value struct<
+            string_value string,
+            int_value int64,
+            double_value float64,
+            boolean_value bool
+          >
+        >
+      >
+    >) as deal,
+
+    cast([] as array<
+      struct<
+        id string,
+        name string,
+        value float64,
+        currency string,
+        promo_action string,
+        discount_amount float64,
+        discount_percentage float64
+      >
+    >) as offers,
+
+    cast(null as struct<
+      id string,
+      status string,
+      manager string,
+      value float64,
+      paid_value float64,
+      refund_value float64,
+      currency string,
+      shipping float64,
+      tax float64,
+      promo_action string,
+      discount_amount float64,
+      discount_percentage float64,
+      payment_method string,
+      custom_params array<
+        struct<
+          key string,
+          value struct<
+            string_value string,
+            int_value int64,
+            double_value float64,
+            boolean_value bool
+          >
+        >
+      >
+    >) as `order`,
+
+    cast([] as array<
+      struct<
+        id string,
+        name string,
+        brand string,
+        category string,
+        sku string,
+        quantity int64,
+        value float64,
+        currency string,
+        promo_action string,
+        discount_amount float64,
+        discount_percentage float64
+      >
+    >) as products,
+
+    cast(null as struct<
+      id string,
+      status string,
+      value float64,
+      currency string,
+      tax float64,
+      payment_method string,
+      deal_id string,
+      order_id string,
+      custom_params array<
+        struct<
+          key string,
+          value struct<
+            string_value string,
+            int_value int64,
+            double_value float64,
+            boolean_value bool
+          >
+        >
+      >
+    >) as transaction,
+
+    cast(null as struct<
+      continent string,
+      sub_continent string,
+      country string,
+      region string,
+      city string
+    >) as geo,
+
+    struct(
+      cast(null as string) as category,
+      cast(null as string) as mobile_brand_name,
+      cast(null as string) as mobile_model_name,
+      cast(null as string) as operating_system,
+      cast(null as string) as operating_system_version,
+      cast(null as string) as language,
+      cast(null as string) as timezone,
+      cast(null as int64) as timezone_offset_seconds,
+      cast(null as string) as ip,
+      cast(null as string) as screen_resolution,
+      struct(
+        'Instagram App' as browser,
+        '(not provided)' as browser_version,
+        'Instagram App' as user_agent
+      ) as web_info
+    ) as device_info,
+
+    cast(null as bool) as is_test_event
+
+  from meta_ad_ids t1
+)
+
+select *
+from synthetic_events
+)""";
+
+set query = replace(query_template, '<project_name>', _project_name);
+set query = replace(query, '<dataset_name>', _dataset_name);
+set query = replace(query, '<project_timezone>', _project_timezone);
+
+execute immediate query;
+
+
+-- 2. Create extended identified_events
+set query_template = """
+create temp table `identified_events_extended` as (
+  select
+    date,
+    timestamp,
+    event_id,
+    event_name,
+    event_params,
+    user_data,
+    user_properties,
+    user_external_ids,
+    profile_id,
+    strimix_avid,
+    ad_data,
+    deal,
+    offers,
+    `order`,
+    products,
+    transaction,
+    geo,
+    device_info,
+    is_test_event
+  from `identified_events`
+
+  union all
+
+  select
+    date,
+    timestamp,
+    event_id,
+    event_name,
+    event_params,
+    user_data,
+    user_properties,
+    user_external_ids,
+    profile_id,
+    strimix_avid,
+    ad_data,
+    deal,
+    offers,
+    `order`,
+    products,
+    transaction,
+    geo,
+    device_info,
+    is_test_event
+  from `synthetic_instagram_identified_events`
+)""";
+
+execute immediate query_template;
+
+
+-- 3. Drop old temp identified_events
+drop table `identified_events`;
+
+
+-- 4. Recreate identified_events with synthetic page_view events included
+set query_template = """
+create temp table `identified_events` as (
+  select
+    date,
+    timestamp,
+    event_id,
+    event_name,
+    event_params,
+    user_data,
+    user_properties,
+    user_external_ids,
+    profile_id,
+    strimix_avid,
+    ad_data,
+    deal,
+    offers,
+    `order`,
+    products,
+    transaction,
+    geo,
+    device_info,
+    is_test_event
+  from `identified_events_extended`
+)""";
+
+execute immediate query_template;
 
 end;
 
@@ -1086,7 +1569,7 @@ orders_last_info_with_single_attribution_groupped as (
 
 orders_result as (
   select
-    extract(date from timestamp_millis(t1.creation_timestamp) at time zone <project_timezone>) date,
+    extract(date from timestamp_millis(t1.creation_timestamp) at time zone "Europe/Kiev") date,
     t1.id,
     t1.profile_id,
     case when
@@ -1129,7 +1612,25 @@ orders_result as (
 )
 
 select
-  t1.date,
+  if (
+    (
+      select cp.value.int_value
+      from unnest(t1.custom_params) cp
+      where cp.key = 'keycrm_entity_created_at'
+      and cp.value.int_value > 0
+      limit 1
+    ) is not null,
+
+    extract(date from timestamp_millis((
+      select cp.value.int_value
+      from unnest(t1.custom_params) cp
+      where cp.key = 'keycrm_entity_created_at'
+      and cp.value.int_value > 0
+      limit 1
+    )) at time zone <project_timezone>),
+
+    t1.date
+  ) date, -- Custom date modification due client requirements
   t1.id,
   t1.profile_id,
   t1.is_first_order,

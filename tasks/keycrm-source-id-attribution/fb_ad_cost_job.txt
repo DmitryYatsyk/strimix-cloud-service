@@ -1,0 +1,566 @@
+begin
+
+declare _project_name string default 'strimix-clients';
+declare _dataset_name string default 'sx_7905';
+
+-- Process Facebook Ads
+begin
+
+declare query string;
+declare query_template string;
+
+-- Delete all costs
+set query_template = """
+delete from `<project_name>.<dataset_name>.ad_costs`
+where data_source = 'FACEBOOK_ADS'
+""";
+
+set query = replace(query_template, '<project_name>', _project_name);
+set query = replace(query, '<dataset_name>', _dataset_name);
+
+execute immediate (query);
+
+-- Insert updated costs
+set query_template = """
+insert into `<project_name>.<dataset_name>.ad_costs` (
+  date,
+  ad_platform,
+  source,
+  medium,
+  campaign,
+  content,
+  term,
+  strimix_refid,
+  landing_page_url, 
+  landing_hostname, 
+  landing_page_path,
+  url_params,
+  cost,
+  currency,
+  impressions,
+  reach,
+  clicks,
+  click_delay,
+  data_source,
+  ad_destination,
+  campaign_id,
+  campaign_name,
+  adgroup_id,
+  adgroup_name,
+  ad_id,
+  ad_name
+)
+
+with 
+-- Create match keys by date, utms, ad_id
+source_match_keys as (
+  select
+    concat(
+      cast(date as string),
+      ad_account_id,
+      ifnull(trim(source), '_'),
+      ifnull(trim(medium), '_'),
+      ifnull(trim(campaign), '_'),
+      ifnull(trim(content), '_'),
+      ifnull(trim(term), '_'),
+      ifnull(trim(strimix_refid), '_'),
+      ad_id
+    ) match_key,
+    *
+  from `<project_name>.<dataset_name>.facebook_ads_ad_costs`
+), 
+
+-- Set match keys row ordering numbers
+ordered_match_keys as (
+  select
+    row_number() over (
+      partition by ad_id, date
+      order by inserted_at asc
+    ) row_number,
+    *
+  from source_match_keys
+), 
+
+-- Detect ads with changed utms
+-- This avoids ad cost duplication when an ad had UTM A on the first download
+-- and then the user changed UTMs to UTM B on a later download.
+find_ads_with_changed_utms as (
+  select
+    case
+      when lead(match_key) over(partition by ad_id, date order by inserted_at asc) != match_key
+      then row_number
+      else null
+    end primary_utm_row_number,
+    match_key,
+    ad_id,
+    date
+  from ordered_match_keys
+),
+
+ads_with_changed_utms as (
+  select *
+  from find_ads_with_changed_utms
+  where primary_utm_row_number is not null
+),
+
+-- Set source rows numbers for ad metrics
+ads_with_changed_utms_filtered as (
+  select 
+    first_value(primary_utm_row_number) over(
+      partition by ad_id, date
+      order by primary_utm_row_number asc
+    ) last_row,
+    date,
+    ad_id,
+    first_value(match_key) over(
+      partition by ad_id, date
+      order by primary_utm_row_number asc
+    ) match_key
+  from ads_with_changed_utms
+),
+
+ads_with_changed_utms_grouped as (
+  select *
+  from ads_with_changed_utms_filtered
+  group by
+    last_row,
+    date,
+    ad_id,
+    match_key
+),
+
+latest_matched_rows as (
+  select 
+    if(
+      match_key in (
+        select i.match_key
+        from ads_with_changed_utms_grouped i
+        where i.match_key = t1.match_key
+      ),
+      (
+        select i.last_row
+        from ads_with_changed_utms_grouped i
+        where i.match_key = t1.match_key
+      ),
+      if(
+        (
+          select i.last_row
+          from ads_with_changed_utms_grouped i
+          where i.date = t1.date
+            and i.ad_id = t1.ad_id
+        ) is null,
+        max(row_number) over(partition by date, ad_id),
+        null
+      )
+    ) last_row,
+    * except(
+      row_number,
+      inserted_at,
+      timezone,
+      landing_page_url,
+      url_params,
+      cost,
+      currency,
+      impressions,
+      reach,
+      clicks,
+      click_delay
+    ) 
+  from ordered_match_keys t1
+),
+
+-- Group source rows
+latest_matched_rows_grouped as (
+  select *
+  from latest_matched_rows
+  where last_row is not null
+  group by
+    match_key,
+    date,
+    ad_account_id,
+    source,
+    medium,
+    campaign,
+    content,
+    term,
+    strimix_refid,
+    last_row,
+    campaign_id,
+    campaign_name,
+    adset_id,
+    adset_name,
+    ad_id,
+    ad_name,
+    ad_destination
+),
+
+-- Saturate ad costs by UTMs
+rows_with_actual_utms as (
+  select
+    b.row_number,
+    b.match_key,
+    c.date, 
+    c.source, 
+    c.medium, 
+    c.campaign, 
+    c.content, 
+    c.term, 
+    c.strimix_refid, 
+    b.landing_page_url, 
+    cast(null as string) landing_hostname,
+    cast(null as string) landing_page_path,
+    b.cost, 
+    b.currency, 
+    b.impressions, 
+    b.reach, 
+    b.clicks, 
+    b.click_delay, 
+    'FACEBOOK_ADS' data_source,
+    c.ad_destination,
+    c.campaign_id,
+    c.campaign_name,
+    c.adset_id,
+    c.adset_name,
+    c.ad_id,
+    c.ad_name
+  from latest_matched_rows_grouped c
+  inner join ordered_match_keys b
+    on b.row_number = c.last_row
+    and b.match_key = c.match_key
+),
+
+-- Detect duplicated chat ad names.
+-- Ambiguity exists only when one date + ad_name maps to multiple ad_id values.
+chat_ad_id_mappings as (
+  select
+    date,
+    ad_name,
+    ad_id
+  from rows_with_actual_utms
+  where 1 = 1
+    and ad_destination = 'chat'
+    and ad_name is not null
+    and ad_id is not null
+  group by
+    date,
+    ad_name,
+    ad_id
+),
+
+chat_ad_name_resolution as (
+  select
+    date,
+    ad_name,
+    count(*) as ad_id_count
+  from chat_ad_id_mappings
+  group by
+    date,
+    ad_name
+),
+
+rows_with_chat_resolution as (
+  select
+    d.*,
+
+    coalesce(r.ad_id_count, 1) as chat_ad_id_count,
+
+    case
+      when d.ad_destination = 'chat'
+        and coalesce(r.ad_id_count, 1) > 1
+      then true
+      else false
+    end as is_combined_chat_ad_name,
+
+    -- Resolved ref ID.
+    -- For duplicated chat ad names, use the same deterministic synthetic ID as ad_id.
+    case
+      when d.ad_destination = 'chat'
+        and coalesce(r.ad_id_count, 1) > 1
+      then concat(
+        'sx_',
+        cast(
+          9000000000000000000
+          + abs(mod(
+              farm_fingerprint(concat(
+                'combined_chat_ad:',
+                cast(d.date as string),
+                ':',
+                ifnull(d.ad_name, '_')
+              )),
+              223372036854775806
+            ))
+          as string
+        )
+      )
+      when d.ad_destination = 'chat'
+      then cast(d.ad_id as string)
+      else cast(d.strimix_refid as string)
+    end as resolved_strimix_refid,
+
+    -- Resolved campaign dimension.
+    case
+      when d.ad_destination = 'chat'
+        and coalesce(r.ad_id_count, 1) > 1
+      then '(combined campaigns)'
+      when d.ad_destination = 'chat'
+      then d.campaign_name
+      else d.campaign
+    end as resolved_campaign,
+
+    -- Resolved ad/content dimension.
+    case
+      when d.ad_destination = 'chat'
+      then d.ad_name
+      else d.content
+    end as resolved_content,
+
+    -- Resolved adset/term dimension.
+    case
+      when d.ad_destination = 'chat'
+        and coalesce(r.ad_id_count, 1) > 1
+      then '(combined adsets)'
+      when d.ad_destination = 'chat'
+      then d.adset_name
+      else d.term
+    end as resolved_term,
+
+    -- Resolved campaign ID/name fields.
+    case
+      when d.ad_destination = 'chat'
+        and coalesce(r.ad_id_count, 1) > 1
+      then '(combined_campaigns)'
+      else cast(d.campaign_id as string)
+    end as resolved_campaign_id,
+
+    case
+      when d.ad_destination = 'chat'
+        and coalesce(r.ad_id_count, 1) > 1
+      then '(combined campaigns)'
+      else d.campaign_name
+    end as resolved_campaign_name,
+
+    -- Resolved adgroup ID/name fields.
+    case
+      when d.ad_destination = 'chat'
+        and coalesce(r.ad_id_count, 1) > 1
+      then '(combined_adsets)'
+      else cast(d.adset_id as string)
+    end as resolved_adgroup_id,
+
+    case
+      when d.ad_destination = 'chat'
+        and coalesce(r.ad_id_count, 1) > 1
+      then '(combined adsets)'
+      else d.adset_name
+    end as resolved_adgroup_name,
+
+    -- Resolved ad ID.
+    -- For duplicated chat ad names, use deterministic synthetic ID with sx_ prefix.
+    -- This makes synthetic ad IDs visually distinguishable from real Facebook ad IDs.
+    case
+      when d.ad_destination = 'chat'
+        and coalesce(r.ad_id_count, 1) > 1
+      then concat(
+        'sx_',
+        cast(
+          9000000000000000000
+          + abs(mod(
+              farm_fingerprint(concat(
+                'combined_chat_ad:',
+                cast(d.date as string),
+                ':',
+                ifnull(d.ad_name, '_')
+              )),
+              223372036854775806
+            ))
+          as string
+        )
+      )
+      else cast(d.ad_id as string)
+    end as resolved_ad_id
+
+  from rows_with_actual_utms d
+  left join chat_ad_name_resolution r
+    on r.date = d.date
+    and r.ad_name = d.ad_name
+),
+
+-- Prepare rows in target ad_costs schema.
+-- Important: we do NOT aggregate here yet.
+-- Exact rows and non-chat rows should preserve existing behavior.
+prepared_ad_cost_rows as (
+  select
+    d.date,
+    'Facebook Ads' as ad_platform,
+
+    if(d.ad_destination = 'chat', 'Facebook', d.source) as source,
+    if(d.ad_destination = 'chat', 'paid', d.medium) as medium,
+
+    d.resolved_campaign as campaign,
+    d.resolved_content as content,
+    d.resolved_term as term,
+    d.resolved_strimix_refid as strimix_refid,
+
+    d.landing_page_url,
+    d.landing_hostname,
+    d.landing_page_path,
+
+    case
+      when d.is_combined_chat_ad_name then cast([] as array<
+        struct<
+          key string,
+          value struct<
+            string_value string
+          >
+        >
+      >)
+      else b.url_params
+    end as url_params,
+
+    d.cost,
+    d.currency,
+    d.impressions,
+    d.reach,
+    d.clicks,
+    d.click_delay,
+
+    d.data_source,
+    d.ad_destination,
+
+    d.resolved_campaign_id as campaign_id,
+    d.resolved_campaign_name as campaign_name,
+    d.resolved_adgroup_id as adgroup_id,
+    d.resolved_adgroup_name as adgroup_name,
+    d.resolved_ad_id as ad_id,
+    d.ad_name,
+
+    d.is_combined_chat_ad_name
+
+  from rows_with_chat_resolution d
+  left join ordered_match_keys b
+    on b.row_number = d.row_number
+    and b.match_key = d.match_key
+),
+
+-- Keep all non-combined rows as-is.
+-- This preserves the old business logic for:
+-- 1. normal Facebook Ads traffic
+-- 2. chat ads where date + ad_name maps to exactly one ad_id
+ad_costs_not_combined as (
+  select
+    date,
+    ad_platform,
+    source,
+    medium,
+    campaign,
+    content,
+    term,
+    strimix_refid,
+    landing_page_url,
+    landing_hostname,
+    landing_page_path,
+    url_params,
+    cost,
+    currency,
+    impressions,
+    reach,
+    clicks,
+    click_delay,
+    data_source,
+    ad_destination,
+    campaign_id,
+    campaign_name,
+    adgroup_id,
+    adgroup_name,
+    ad_id,
+    ad_name
+  from prepared_ad_cost_rows
+  where is_combined_chat_ad_name = false
+),
+
+-- Aggregate only duplicated chat ad names into one combined row.
+-- This is the only place where business logic intentionally changes.
+ad_costs_combined_chat as (
+  select
+    date,
+    ad_platform,
+    source,
+    medium,
+    campaign,
+    content,
+    term,
+    strimix_refid,
+
+    cast(null as string) as landing_page_url,
+    cast(null as string) as landing_hostname,
+    cast(null as string) as landing_page_path,
+
+    cast([] as array<
+      struct<
+        key string,
+        value struct<
+          string_value string
+        >
+      >
+    >) as url_params,
+
+    sum(cost) as cost,
+    currency,
+    sum(impressions) as impressions,
+    sum(reach) as reach,
+    sum(clicks) as clicks,
+    any_value(click_delay) as click_delay,
+
+    data_source,
+    ad_destination,
+    campaign_id,
+    campaign_name,
+    adgroup_id,
+    adgroup_name,
+    ad_id,
+    ad_name
+
+  from prepared_ad_cost_rows
+  where is_combined_chat_ad_name = true
+  group by
+    date,
+    ad_platform,
+    source,
+    medium,
+    campaign,
+    content,
+    term,
+    strimix_refid,
+    currency,
+    data_source,
+    ad_destination,
+    campaign_id,
+    campaign_name,
+    adgroup_id,
+    adgroup_name,
+    ad_id,
+    ad_name
+),
+
+ad_costs as (
+  select *
+  from ad_costs_not_combined
+
+  union all
+
+  select *
+  from ad_costs_combined_chat
+)
+
+select *
+from ad_costs
+""";
+
+set query = replace(query_template, '<project_name>', _project_name);
+set query = replace(query, '<dataset_name>', _dataset_name);
+
+execute immediate (query);
+
+end;
+
+end;

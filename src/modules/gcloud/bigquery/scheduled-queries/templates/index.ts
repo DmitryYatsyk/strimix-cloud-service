@@ -1,22 +1,13 @@
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
-export const CALCULATE_EVENTS_ATTRIBUTION_TEMPLATE = readFileSync(
-  join(__dirname, 'calculate-events-attribution.sql'),
-  'utf-8',
-)
-
-export const UPDATE_FACEBOOK_ADS_AD_COSTS_TEMPLATE = readFileSync(
-  join(__dirname, 'update-facebook-ads-costs.sql'),
-  'utf-8',
-)
-
-export const UPDATE_GOOGLE_ADS_AD_COSTS_TEMPLATE = readFileSync(
-  join(__dirname, 'update-google-ads-costs.sql'),
-  'utf-8',
-)
-
-export const UPDATE_TIKTOK_ADS_AD_COSTS_TEMPLATE = readFileSync(
-  join(__dirname, 'update-tiktok-ads-costs.sql'),
+/**
+ * Единая джоба проекта: последовательно обновляет расходы всех рекламных
+ * коннекторов (Facebook / Google / TikTok / ручные из Google Sheets) и затем
+ * запускает атрибуцию и классификацию трафика по свежему снимку ad_costs.
+ * Деплоится как одна scheduled query (раздел 11 ТЗ).
+ */
+export const UPDATE_COSTS_AND_CALCULATE_ATTRIBUTION_TEMPLATE = readFileSync(
+  join(__dirname, 'update-costs-and-calculate-attribution.sql'),
   'utf-8',
 )

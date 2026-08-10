@@ -39,4 +39,13 @@ export const AD_COSTS_TABLE_SCHEMA = [
   { name: 'adgroup_name', type: 'STRING' },
   { name: 'ad_id', type: 'STRING' },
   { name: 'ad_name', type: 'STRING' },
+  // Resolved traffic classification (see traffic_rules table). Recalculated
+  // by the events attribution scheduled query on every run.
+  { name: 'traffic_origin', type: 'STRING' },
+  { name: 'traffic_channel', type: 'STRING' },
+  // Normalized landing page ("host/path?query", lowercase, no protocol/www/
+  // trailing slash; tracking query params stripped, functional ones kept and
+  // sorted). Shared column with visits.landing_page so merged reports can
+  // break down ad costs and visits by the same landing page key.
+  { name: 'landing_page', type: 'STRING' },
 ]

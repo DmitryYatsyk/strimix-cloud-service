@@ -178,6 +178,15 @@ export class BigQueryApi {
   }
 
   /**
+   * Runs an arbitrary SQL statement (e.g. seeding config tables with
+   * default rows right after creation)
+   * @param query - SQL statement to execute
+   */
+  public async runQuery(query: string): Promise<void> {
+    await this.bigquery.query({ query, location: this.location })
+  }
+
+  /**
    * Checks if a dataset exists
    * @param projectId - GCP Project ID
    * @param datasetId - Dataset ID to check
@@ -221,6 +230,16 @@ export class BigQueryApi {
     }
 
     return { exists: false }
+  }
+
+  /**
+   * Deletes a Scheduled Query (transfer config) by its full resource name,
+   * e.g. `projects/{id}/locations/{loc}/transferConfigs/{configId}`.
+   * Used to remove the legacy per-connector jobs after they were merged
+   * into the single update-costs-and-calculate-attribution job.
+   */
+  public async deleteScheduledQuery(name: string): Promise<void> {
+    await this.bqTransfer.deleteTransferConfig({ name })
   }
 
   public async createScheduledQuery(

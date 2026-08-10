@@ -1,0 +1,186 @@
+export const TRAFFIC_RULES_TABLE_ID = 'traffic_rules'
+
+/**
+ * Data-driven traffic classification rules.
+ *
+ * Resolution is done in three stages:
+ *  - stage = 'utm': rewrites the canonical labels (source, medium, campaign,
+ *    content, term, strimix_refid) via the `set_*` output columns. Applies to
+ *    SYNTHETIC visits and to ad_costs rows; a rule with applies_to_web = true
+ *    additionally applies to WEB visits (utm aliasing). Runs before
+ *    origin/channel classification, so the rewritten labels participate both
+ *    in classification and in visit-to-cost matching.
+ *    PER-FIELD SEMANTICS: within the stage every `set_*` field is taken from
+ *    the FIRST rule by `priority` that defines it (non-null) among all
+ *    matching rules — different rules may fill different fields of the same
+ *    row. A rule output OVERWRITES the extracted/parsed label; an extracted
+ *    value survives only when no matching rule sets that field.
+ *    PLACEHOLDERS: `set_*` values may reference the resolved ad identity —
+ *    {data_source}, {campaign_id}, {campaign_name}, {adgroup_id},
+ *    {adgroup_name}, {ad_id}, {ad_name}. Substitution is PER-ROW TRUTH: an
+ *    ad_costs row expands placeholders from its OWN network columns (every
+ *    namesake row keeps its own real campaign/adgroup name); a synthetic
+ *    visit expands them from the UNAMBIGUOUS values of its resolved group —
+ *    a field that diverges within the group yields null. The '(combined)'
+ *    marker is never written into persisted labels; bucket ambiguity is
+ *    computed by the reporting engine at read time, and visit-to-cost
+ *    matching relies on attributed_ad (id/name tiers), not on byte-equal
+ *    labels. Placeholder rules follow the ALL-OR-NOTHING projection: they
+ *    fire only when all five canonical labels (source, medium, campaign,
+ *    content, term) of the row are still empty, so partial real utm sets
+ *    are never mixed with projected ones.
+ *  - stage = 'origin':  resolves `traffic_origin` (a concrete traffic source,
+ *    e.g. "Meta Ads", "Google", "Telegram"). First matching rule by
+ *    `priority` wins.
+ *  - stage = 'channel': resolves `traffic_channel` (a high-level category,
+ *    e.g. "Paid Social", "Organic Search"). First matching rule wins.
+ *    Channel-stage rules may match on the already-resolved `traffic_origin`
+ *    via `traffic_origin_regex`, or directly on utm/ad fields.
+ *
+ * All non-null condition columns are ANDed. Regex conditions are evaluated
+ * CASE-SENSITIVELY as written; for case-insensitive matching the rule author
+ * puts `(?i)` into the regex itself (e.g. `(?i)^(facebook|fb)$`). System
+ * seed rules that intentionally normalize across casing include `(?i)` in
+ * their patterns. AD-DERIVED CONDITIONS (data_source_regex,
+ * ad_destination_regex, campaign/adgroup/ad id and name regexes) are checked
+ * on the ad_costs row itself; for a synthetic visit they are checked on the
+ * UNIFIED value of its resolved group (a value ambiguous within the group —
+ * e.g. namesakes in different networks — does not satisfy a concrete-value
+ * condition); a rule using them never matches web visits or visits without
+ * a resolved group.
+ *
+ * System default rules (is_system = true) are seeded ONCE at project deploy,
+ * right after the table is created (see buildTrafficRulesSeedQuery). The
+ * attribution scheduled query never re-inserts them, so every rule — system
+ * or custom — is freely editable and deletable per project. New system
+ * defaults do NOT propagate to already-deployed projects automatically
+ * (deliver them via a data-mapping sync job or a "restore defaults" CRUD
+ * action). Client custom rules should use is_system = false and
+ * priority < 1000 to win over system defaults.
+ */
+export const TRAFFIC_RULES_TABLE_SCHEMA = [
+  { name: 'rule_id', type: 'STRING', mode: 'REQUIRED' },
+  { name: 'priority', type: 'INTEGER', mode: 'REQUIRED' },
+  { name: 'is_active', type: 'BOOLEAN', mode: 'REQUIRED' },
+  { name: 'is_system', type: 'BOOLEAN', mode: 'REQUIRED' },
+  { name: 'stage', type: 'STRING', mode: 'REQUIRED' }, // 'utm' | 'origin' | 'channel'
+  { name: 'target', type: 'STRING', mode: 'REQUIRED' }, // 'visit' | 'ad_cost' | 'both'
+  // 'utm'-stage-only flag: the rule additionally applies to WEB visits
+  // (utm aliasing). Null is treated as false
+  { name: 'applies_to_web', type: 'BOOLEAN' },
+  // Conditions (all nullable, non-null conditions are ANDed)
+  { name: 'source_regex', type: 'STRING' },
+  { name: 'medium_regex', type: 'STRING' },
+  { name: 'campaign_regex', type: 'STRING' },
+  { name: 'content_regex', type: 'STRING' },
+  { name: 'term_regex', type: 'STRING' },
+  { name: 'strimix_refid_regex', type: 'STRING' },
+  // Ad-derived condition fields: compared with the ad_costs row itself, or
+  // with the resolved group of a synthetic visit (the group's unified value
+  // must satisfy them). Rules using them never match web visits
+  { name: 'data_source_regex', type: 'STRING' },
+  { name: 'campaign_id_regex', type: 'STRING' },
+  { name: 'campaign_name_regex', type: 'STRING' },
+  { name: 'adgroup_id_regex', type: 'STRING' },
+  { name: 'adgroup_name_regex', type: 'STRING' },
+  { name: 'ad_id_regex', type: 'STRING' },
+  { name: 'ad_name_regex', type: 'STRING' },
+  { name: 'ad_destination_regex', type: 'STRING' },
+  // Matches a url_params entry (actual query params parsed from
+  // page_location, incl. custom utm labels like placement): key equality +
+  // optional value regex. Synthetic visits have empty url_params — rules
+  // targeting them match on the label columns (source_regex etc.)
+  { name: 'url_param_key', type: 'STRING' },
+  { name: 'url_param_value_regex', type: 'STRING' },
+  // Channel-stage-only condition: matches the resolved traffic_origin
+  { name: 'traffic_origin_regex', type: 'STRING' },
+  // Outputs (set_* fields write values into visits/ad_costs columns):
+  // 'utm' stage rules rewrite the canonical labels (null = the rule does not
+  // touch the field; values may contain the placeholders listed above)
+  { name: 'set_source', type: 'STRING' },
+  { name: 'set_medium', type: 'STRING' },
+  { name: 'set_campaign', type: 'STRING' },
+  { name: 'set_content', type: 'STRING' },
+  { name: 'set_term', type: 'STRING' },
+  { name: 'set_strimix_refid', type: 'STRING' },
+  // 'origin' / 'channel' stage rules fill the classification columns
+  { name: 'set_traffic_origin', type: 'STRING' },
+  { name: 'set_traffic_channel', type: 'STRING' },
+]
+
+/**
+ * Builds the one-time seed of system default classification rules. Executed
+ * at project deploy right after the traffic_rules table is created.
+ *
+ * Seed groups:
+ *  - utm projection pair: fills empty canonical labels of NON-WEB ad_costs
+ *    rows and synthetic visits from the ad identity (all-or-nothing;
+ *    per-row values on cost rows, unambiguous-or-null group values on
+ *    visits). Delivered as a pair (target='ad_cost' + target='visit') so
+ *    both pipelines produce labels by the same convention.
+ *  - origin by network name: catches labels produced by the projection pair
+ *    (source = '{data_source}' -> 'FACEBOOK_ADS' etc.)
+ *  - AI assistants (official UTM only): ChatGPT — OpenAI documents
+ *    utm_source=chatgpt.com on citation links → origin ChatGPT, channel
+ *    AI Assistants. Other AI platforms omitted until vendor documents UTM.
+ *
+ * Regex conditions are case-sensitive by default. Seeds that intentionally
+ * match labels across casing embed `(?i)` in the pattern; the exact
+ * `(direct)` marker and the lowercase ad_destination taxonomy stay
+ * case-sensitive.
+ */
+export function buildTrafficRulesSeedQuery(projectId: string, datasetId: string): string {
+  return `insert into \`${projectId}.${datasetId}.${TRAFFIC_RULES_TABLE_ID}\`
+(rule_id, priority, is_active, is_system, stage, target, applies_to_web, source_regex, medium_regex, ad_destination_regex, data_source_regex, traffic_origin_regex, set_source, set_medium, set_campaign, set_content, set_term, set_traffic_origin, set_traffic_channel)
+values
+-- Utm stage: projection pair for non-web ads (all-or-nothing, per-row truth)
+-- ad_destination taxonomy is always lowercase from connectors — no (?i)
+('sys_utm_projection_ad_costs', 1000, true, true, 'utm', 'ad_cost', false, null, null, '^(call|chat|app|lead_form|engagement|catalog|multi_destination|unknown)$', null, null, '{data_source}', '(not set)', '{campaign_name}', '{adgroup_name}', '{ad_name}', null, null),
+('sys_utm_projection_visits', 1001, true, true, 'utm', 'visit', false, null, null, '^(call|chat|app|lead_form|engagement|catalog|multi_destination|unknown)$', null, null, '{data_source}', '(not set)', '{campaign_name}', '{adgroup_name}', '{ad_name}', null, null),
+-- Origin stage: paid sources by utm labels ((?i) — catch Facebook/FACEBOOK/…)
+('sys_origin_google_ads', 1000, true, true, 'origin', 'both', null, '(?i)^(google|adwords|google[ _-]?ads)$', '(?i)^(cpc|ppc|paid|paid_search|paidsearch)$', null, null, null, null, null, null, null, null, 'Google Ads', null),
+('sys_origin_bing_ads', 1010, true, true, 'origin', 'both', null, '(?i)^(bing|bing[ _-]?ads)$', '(?i)^(cpc|ppc|paid|paid_search|paidsearch)$', null, null, null, null, null, null, null, null, 'Bing Ads', null),
+('sys_origin_meta_ads', 1020, true, true, 'origin', 'both', null, '(?i)^(fb|facebook|meta|ig|instagram|facebook[ _-]?ads|meta[ _-]?ads|an|msg)$', '(?i)^(cpc|ppc|paid|paid_social|paidsocial|social_paid)$', null, null, null, null, null, null, null, null, 'Meta Ads', null),
+('sys_origin_tiktok_ads', 1030, true, true, 'origin', 'both', null, '(?i)^(tiktok|tt|tiktok[ _-]?ads)$', '(?i)^(cpc|ppc|paid|paid_social|paidsocial|social_paid)$', null, null, null, null, null, null, null, null, 'TikTok Ads', null),
+('sys_origin_linkedin_ads', 1040, true, true, 'origin', 'both', null, '(?i)^(linkedin|li|linkedin[ _-]?ads)$', '(?i)^(cpc|ppc|paid|paid_social|paidsocial|social_paid)$', null, null, null, null, null, null, null, null, 'LinkedIn Ads', null),
+-- Origin stage: paid sources by network name in source (labels produced by
+-- the projection pair: source = data_source, e.g. FACEBOOK_ADS)
+('sys_origin_meta_ads_network', 1060, true, true, 'origin', 'both', null, '(?i)^(facebook[ _-]?ads|meta[ _-]?ads)$', null, null, null, null, null, null, null, null, null, 'Meta Ads', null),
+('sys_origin_google_ads_network', 1070, true, true, 'origin', 'both', null, '(?i)^google[ _-]?ads$', null, null, null, null, null, null, null, null, null, 'Google Ads', null),
+('sys_origin_tiktok_ads_network', 1080, true, true, 'origin', 'both', null, '(?i)^tiktok[ _-]?ads$', null, null, null, null, null, null, null, null, null, 'TikTok Ads', null),
+-- Origin stage: search engines
+('sys_origin_google', 1100, true, true, 'origin', 'both', null, '(?i)^(google|www[.]google[.][a-z.]+|google[.][a-z.]+)$', null, null, null, null, null, null, null, null, null, 'Google', null),
+('sys_origin_bing', 1110, true, true, 'origin', 'both', null, '(?i)^(bing|www[.]bing[.]com|bing[.]com)$', null, null, null, null, null, null, null, null, null, 'Bing', null),
+('sys_origin_yandex', 1120, true, true, 'origin', 'both', null, '(?i)^(yandex|yandex[.][a-z.]+|www[.]yandex[.][a-z.]+)$', null, null, null, null, null, null, null, null, null, 'Yandex', null),
+('sys_origin_duckduckgo', 1130, true, true, 'origin', 'both', null, '(?i)^(duckduckgo|duckduckgo[.]com)$', null, null, null, null, null, null, null, null, null, 'DuckDuckGo', null),
+-- Origin stage: AI assistants (official UTM only — OpenAI documents
+-- utm_source=chatgpt.com on ChatGPT citation / search referral links)
+('sys_origin_chatgpt', 1180, true, true, 'origin', 'both', null, '(?i)^chatgpt[.]com$', null, null, null, null, null, null, null, null, null, 'ChatGPT', null),
+-- Origin stage: messengers and social referrers
+('sys_origin_telegram', 1200, true, true, 'origin', 'both', null, '(?i)^(telegram|t[.]me|telegram[.]me|web[.]telegram[.]org|org[.]telegram[.]messenger)$', null, null, null, null, null, null, null, null, null, 'Telegram', null),
+('sys_origin_whatsapp', 1210, true, true, 'origin', 'both', null, '(?i)^(whatsapp|wa|api[.]whatsapp[.]com|chat[.]whatsapp[.]com|com[.]whatsapp)$', null, null, null, null, null, null, null, null, null, 'WhatsApp', null),
+('sys_origin_viber', 1220, true, true, 'origin', 'both', null, '(?i)^(viber|com[.]viber[.]voip)$', null, null, null, null, null, null, null, null, null, 'Viber', null),
+('sys_origin_youtube', 1230, true, true, 'origin', 'both', null, '(?i)^(youtube|youtube[.]com|www[.]youtube[.]com|m[.]youtube[.]com)$', null, null, null, null, null, null, null, null, null, 'YouTube', null),
+('sys_origin_instagram', 1240, true, true, 'origin', 'both', null, '(?i)^(instagram[.]com|l[.]instagram[.]com|www[.]instagram[.]com|com[.]instagram[.]android)$', null, null, null, null, null, null, null, null, null, 'Instagram', null),
+('sys_origin_facebook', 1250, true, true, 'origin', 'both', null, '(?i)^(facebook[.]com|m[.]facebook[.]com|l[.]facebook[.]com|lm[.]facebook[.]com|www[.]facebook[.]com)$', null, null, null, null, null, null, null, null, null, 'Facebook', null),
+('sys_origin_threads', 1255, true, true, 'origin', 'both', null, '(?i)^l[.]threads[.]com$', null, null, null, null, null, null, null, null, null, 'Threads', null),
+-- Origin stage: direct (exact marker)
+('sys_origin_direct', 1300, true, true, 'origin', 'both', null, '^[(]direct[)]$', null, null, null, null, null, null, null, null, null, 'Direct', null),
+-- Origin stage: empty/null source → Unknown. Job conditions match via
+-- ifnull(source, ''), so '^$' covers both null and empty string. Localizable
+-- by changing set_traffic_origin; the job still keeps a hardcoded 'Unknown'
+-- fallback if this rule is missing.
+('sys_origin_unknown', 1310, true, true, 'origin', 'both', null, '^$', null, null, null, null, null, null, null, null, null, 'Unknown', null),
+-- Channel stage: resolved from traffic_origin ((?i) — origins are Title Case)
+('sys_channel_paid_social', 2000, true, true, 'channel', 'both', null, null, null, null, null, '(?i)^(meta ads|tiktok ads|linkedin ads|instagram direct)$', null, null, null, null, null, null, 'Paid Social'),
+('sys_channel_paid_search', 2010, true, true, 'channel', 'both', null, null, null, null, null, '(?i)^(google ads|bing ads)$', null, null, null, null, null, null, 'Paid Search'),
+('sys_channel_ai_assistants', 2015, true, true, 'channel', 'both', null, null, null, null, null, '(?i)^chatgpt$', null, null, null, null, null, null, 'AI Assistants'),
+('sys_channel_organic_search', 2020, true, true, 'channel', 'both', null, null, null, null, null, '(?i)^(google|bing|yandex|duckduckgo)$', null, null, null, null, null, null, 'Organic Search'),
+('sys_channel_messenger', 2030, true, true, 'channel', 'both', null, null, null, null, null, '(?i)^(telegram|whatsapp|viber)$', null, null, null, null, null, null, 'Messenger'),
+('sys_channel_email', 2040, true, true, 'channel', 'both', null, null, '(?i)^(email|e-mail|e_mail|newsletter)$', null, null, null, null, null, null, null, null, null, 'Email'),
+('sys_channel_organic_social_medium', 2050, true, true, 'channel', 'both', null, null, '(?i)^(social|organic_social|social_organic|organicsocial)$', null, null, null, null, null, null, null, null, null, 'Organic Social'),
+('sys_channel_organic_social_origin', 2060, true, true, 'channel', 'both', null, null, null, null, null, '(?i)^(instagram|facebook|youtube)$', null, null, null, null, null, null, 'Organic Social'),
+('sys_channel_organic_social_threads', 2065, true, true, 'channel', 'both', null, null, null, null, null, '(?i)^threads$', null, null, null, null, null, null, 'Organic Social'),
+('sys_channel_referral', 2070, true, true, 'channel', 'both', null, null, '(?i)^referral$', null, null, null, null, null, null, null, null, null, 'Referral'),
+('sys_channel_direct', 2080, true, true, 'channel', 'both', null, null, null, null, null, '(?i)^direct$', null, null, null, null, null, null, 'Direct')`
+}

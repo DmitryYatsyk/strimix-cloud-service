@@ -17,11 +17,24 @@ export interface IProjectResources {
         facebook_ads_ad_costs: string | null
         google_ads_ad_costs: string | null
         tiktok_ads_ad_costs: string | null
+        traffic_rules: string | null
+        attribution_signal_mappings: string | null
+        excluded_url_params: string | null
       }
       scheduled_queries: {
+        /**
+         * Единая джоба проекта: расходы всех коннекторов + атрибуция и
+         * классификация трафика одной scheduled query (заменила четыре
+         * легаси-джобы ниже).
+         */
+        update_costs_and_calculate_attribution: string | null
+        /** @deprecated легаси-джобы до объединения; деплой удаляет их и обнуляет ссылки */
         calculate_events_attribution: string | null
+        /** @deprecated легаси-джобы до объединения; деплой удаляет их и обнуляет ссылки */
         facebook_ads_ad_costs_update: string | null
+        /** @deprecated легаси-джобы до объединения; деплой удаляет их и обнуляет ссылки */
         google_ads_ad_costs_update: string | null
+        /** @deprecated легаси-джобы до объединения; деплой удаляет их и обнуляет ссылки */
         tiktok_ads_ad_costs_update: string | null
       }
     }

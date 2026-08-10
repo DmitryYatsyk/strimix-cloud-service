@@ -10,7 +10,7 @@ import {
   AD_COSTS_TABLE_SCHEMA,
   BigQueryApi,
   EXCLUDED_REFERRERS_TABLE_ID,
-  EXCLUDED_REFERRERS_VIEW_QUERY,
+  EXCLUDED_REFERRERS_TABLE_SCHEMA,
   GOOGLE_ADS_AD_COSTS_TABLE_ID,
   GOOGLE_ADS_AD_COSTS_TABLE_SCHEMA,
   IDENTIFIED_EVENTS_TABLE_ID,
@@ -23,8 +23,17 @@ import {
   TIKTOK_ADS_AD_COSTS_TABLE_ID,
   RAW_EVENTS_TABLE_SCHEMA,
   RAW_EVENTS_TABLE_ID,
-  CALCULATE_EVENTS_ATTRIBUTION_TEMPLATE,
+  TRAFFIC_RULES_TABLE_ID,
+  TRAFFIC_RULES_TABLE_SCHEMA,
+  buildTrafficRulesSeedQuery,
+  ATTRIBUTION_SIGNAL_MAPPINGS_TABLE_ID,
+  ATTRIBUTION_SIGNAL_MAPPINGS_TABLE_SCHEMA,
+  EXCLUDED_URL_PARAMS_TABLE_ID,
+  EXCLUDED_URL_PARAMS_TABLE_SCHEMA,
+  buildExcludedUrlParamsSeedQuery,
+  UPDATE_COSTS_AND_CALCULATE_ATTRIBUTION_TEMPLATE,
   SCHEDULED_QUERY_CONFIGS,
+  LEGACY_SCHEDULED_QUERY_DISPLAY_NAME_PREFIXES,
   processScheduledQueryTemplate,
 } from '@modules/gcloud/bigquery'
 import {
@@ -34,11 +43,6 @@ import {
   PubSubApi,
 } from '@modules/gcloud/pubsub'
 import { ProjectConfigRepository as DataProcessingServiceProjectConfigRepository } from '@modules/data-processing-service/project-config'
-import {
-  UPDATE_FACEBOOK_ADS_AD_COSTS_TEMPLATE,
-  UPDATE_GOOGLE_ADS_AD_COSTS_TEMPLATE,
-  UPDATE_TIKTOK_ADS_AD_COSTS_TEMPLATE,
-} from '@modules/gcloud/bigquery/scheduled-queries/templates'
 import axios from 'axios'
 
 const deployProjectResources = async (projectId: number, resourceGroupId: string) => {
@@ -104,6 +108,7 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
               tiktok_ads_ad_costs: null,
             },
             scheduled_queries: {
+              update_costs_and_calculate_attribution: null,
               calculate_events_attribution: null,
               facebook_ads_ad_costs_update: null,
               google_ads_ad_costs_update: null,
@@ -214,21 +219,26 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 9. Create BigQuery excluded referrers view
+    // 9. Create BigQuery excluded referrers table (client-owned list of
+    // referrer hosts that must not count as referral traffic). Created empty:
+    // the future UI / SQL edits populate it. Existing projects that still have
+    // the legacy view keep it until a dedicated migration replaces it.
     if (!bq.tables.excluded_referrers) {
-      const viewId = EXCLUDED_REFERRERS_TABLE_ID
-      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, viewId)
+      const tableId = EXCLUDED_REFERRERS_TABLE_ID
+      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
       if (!tableExists) {
-        console.log('BigQuery excluded referrers view not found, creating view...')
-        await bigqueryApi.createView({
+        console.log('BigQuery excluded referrers table not found, creating table...')
+        await bigqueryApi.createTable({
           projectId: gcpProjectId,
           datasetId: bq.dataset.id,
-          viewId,
-          query: EXCLUDED_REFERRERS_VIEW_QUERY,
+          tableId,
+          schema: EXCLUDED_REFERRERS_TABLE_SCHEMA,
+          description:
+            'Excluded referrer hosts. Client-owned; edited via SQL / UI. Attribution job unnests hosts when classifying referrals.',
         })
       }
 
-      bq.tables.excluded_referrers = fullTableId(viewId)
+      bq.tables.excluded_referrers = fullTableId(tableId)
       await projectResources.save()
     }
 
@@ -248,6 +258,68 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       }
 
       bq.tables.ad_costs = fullTableId(tableId)
+      await projectResources.save()
+    }
+
+    // 10.1 Create BigQuery traffic classification rules table and seed the
+    // system default rules once. After that the rules are fully client-owned:
+    // neither this use case nor the attribution job ever overwrites them
+    if (!bq.tables.traffic_rules) {
+      const tableId = TRAFFIC_RULES_TABLE_ID
+      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
+      if (!tableExists) {
+        console.log('BigQuery traffic rules table not found, creating table...')
+        await bigqueryApi.createTable({
+          projectId: gcpProjectId,
+          datasetId: bq.dataset.id,
+          tableId,
+          schema: TRAFFIC_RULES_TABLE_SCHEMA,
+        })
+        console.log('Seeding system default traffic rules...')
+        await bigqueryApi.runQuery(buildTrafficRulesSeedQuery(gcpProjectId, bq.dataset.id))
+      }
+
+      bq.tables.traffic_rules = fullTableId(tableId)
+      await projectResources.save()
+    }
+
+    // 10.2 Create BigQuery attribution signal mappings table
+    if (!bq.tables.attribution_signal_mappings) {
+      const tableId = ATTRIBUTION_SIGNAL_MAPPINGS_TABLE_ID
+      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
+      if (!tableExists) {
+        console.log('BigQuery attribution signal mappings table not found, creating table...')
+        await bigqueryApi.createTable({
+          projectId: gcpProjectId,
+          datasetId: bq.dataset.id,
+          tableId,
+          schema: ATTRIBUTION_SIGNAL_MAPPINGS_TABLE_SCHEMA,
+        })
+      }
+
+      bq.tables.attribution_signal_mappings = fullTableId(tableId)
+      await projectResources.save()
+    }
+
+    // 10.3 Create BigQuery excluded url params table and seed the system
+    // default rows once. After that the list is fully client-owned: neither
+    // this use case nor the attribution job ever overwrites it
+    if (!bq.tables.excluded_url_params) {
+      const tableId = EXCLUDED_URL_PARAMS_TABLE_ID
+      const tableExists = await bigqueryApi.tableExists(bq.dataset.id, tableId)
+      if (!tableExists) {
+        console.log('BigQuery excluded url params table not found, creating table...')
+        await bigqueryApi.createTable({
+          projectId: gcpProjectId,
+          datasetId: bq.dataset.id,
+          tableId,
+          schema: EXCLUDED_URL_PARAMS_TABLE_SCHEMA,
+        })
+        console.log('Seeding system default excluded url params...')
+        await bigqueryApi.runQuery(buildExcludedUrlParamsSeedQuery(gcpProjectId, bq.dataset.id))
+      }
+
+      bq.tables.excluded_url_params = fullTableId(tableId)
       await projectResources.save()
     }
 
@@ -338,42 +410,6 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 15.2 Create Facebook Ads ad cost update scheduled query
-    const facebookAdsConfig = SCHEDULED_QUERY_CONFIGS.facebookAdsAdCostsUpdate
-    const facebookAdsDisplayName = facebookAdsConfig.displayNamePrefix.replace(
-      '@PROJECT_ID',
-      projectId.toString(),
-    )
-    const facebookAdsQueryResult =
-      await bigqueryApi.findScheduledQueryByName(facebookAdsDisplayName)
-    if (facebookAdsQueryResult.exists) {
-      if (!bq.scheduled_queries.facebook_ads_ad_costs_update) {
-        bq.scheduled_queries.facebook_ads_ad_costs_update = facebookAdsQueryResult.name!
-        await projectResources.save()
-      }
-    } else {
-      console.log('Creating Facebook Ads ad cost update scheduled query...')
-      const facebookAdsQuery = processScheduledQueryTemplate(
-        UPDATE_FACEBOOK_ADS_AD_COSTS_TEMPLATE,
-        {
-          projectName: gcpProjectId,
-          datasetName: bq.dataset.id,
-          projectTimezone: projectInfo.timezone,
-        },
-      )
-
-      const created = await bigqueryApi.createScheduledQuery({
-        displayName: facebookAdsDisplayName,
-        query: facebookAdsQuery,
-        schedule: facebookAdsConfig.schedule,
-        location: bq.dataset.location!,
-        startNow: true,
-      })
-
-      bq.scheduled_queries.facebook_ads_ad_costs_update = created.name
-      await projectResources.save()
-    }
-
     // 16.1 Create Google Ads ad costs table
     if (!bq.tables.google_ads_ad_costs) {
       const tableId = GOOGLE_ADS_AD_COSTS_TABLE_ID
@@ -390,38 +426,6 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       }
 
       bq.tables.google_ads_ad_costs = fullTableId(tableId)
-      await projectResources.save()
-    }
-
-    // 16.2 Create Google Ads ad cost update scheduled query
-    const googleAdsConfig = SCHEDULED_QUERY_CONFIGS.googleAdsAdCostsUpdate
-    const googleAdsDisplayName = googleAdsConfig.displayNamePrefix.replace(
-      '@PROJECT_ID',
-      projectId.toString(),
-    )
-    const googleAdsQueryResult = await bigqueryApi.findScheduledQueryByName(googleAdsDisplayName)
-    if (googleAdsQueryResult.exists) {
-      if (!bq.scheduled_queries.google_ads_ad_costs_update) {
-        bq.scheduled_queries.google_ads_ad_costs_update = googleAdsQueryResult.name!
-        await projectResources.save()
-      }
-    } else {
-      console.log('Creating Google Ads ad cost update scheduled query...')
-      const googleAdsQuery = processScheduledQueryTemplate(UPDATE_GOOGLE_ADS_AD_COSTS_TEMPLATE, {
-        projectName: gcpProjectId,
-        datasetName: bq.dataset.id,
-        projectTimezone: projectInfo.timezone,
-      })
-
-      const created = await bigqueryApi.createScheduledQuery({
-        displayName: googleAdsDisplayName,
-        query: googleAdsQuery,
-        schedule: googleAdsConfig.schedule,
-        location: bq.dataset.location!,
-        startNow: true,
-      })
-
-      bq.scheduled_queries.google_ads_ad_costs_update = created.name
       await projectResources.save()
     }
 
@@ -444,56 +448,50 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       await projectResources.save()
     }
 
-    // 17.2 Create TikTok Ads ad cost update scheduled query
-    const tiktokAdsConfig = SCHEDULED_QUERY_CONFIGS.tiktokAdsAdCostsUpdate
-    const tiktokAdsDisplayName = tiktokAdsConfig.displayNamePrefix.replace(
-      '@PROJECT_ID',
-      projectId.toString(),
-    )
-    const tiktokAdsQueryResult = await bigqueryApi.findScheduledQueryByName(tiktokAdsDisplayName)
-
-    if (tiktokAdsQueryResult.exists) {
-      if (!bq.scheduled_queries.tiktok_ads_ad_costs_update) {
-        bq.scheduled_queries.tiktok_ads_ad_costs_update = tiktokAdsQueryResult.name!
-        await projectResources.save()
+    // 18. Delete legacy scheduled queries (separate cost jobs + separate
+    // attribution job). They were merged into the single
+    // update-costs-and-calculate-attribution job, so for existing projects
+    // they must be removed first — otherwise the same recalculations would
+    // run twice in parallel
+    for (const legacyPrefix of LEGACY_SCHEDULED_QUERY_DISPLAY_NAME_PREFIXES) {
+      const legacyDisplayName = legacyPrefix.replace('@PROJECT_ID', projectId.toString())
+      const legacyQueryResult = await bigqueryApi.findScheduledQueryByName(legacyDisplayName)
+      if (legacyQueryResult.exists && legacyQueryResult.name) {
+        console.log(`Deleting legacy scheduled query ${legacyDisplayName}...`)
+        await bigqueryApi.deleteScheduledQuery(legacyQueryResult.name)
       }
-    } else {
-      console.log('Creating TikTok Ads ad cost update scheduled query...')
-      const tiktokAdsQuery = processScheduledQueryTemplate(UPDATE_TIKTOK_ADS_AD_COSTS_TEMPLATE, {
-        projectName: gcpProjectId,
-        datasetName: bq.dataset.id,
-        projectTimezone: projectInfo.timezone,
-      })
-
-      const created = await bigqueryApi.createScheduledQuery({
-        displayName: tiktokAdsDisplayName,
-        query: tiktokAdsQuery,
-        schedule: tiktokAdsConfig.schedule,
-        location: bq.dataset.location!,
-        startNow: true,
-      })
-
-      bq.scheduled_queries.tiktok_ads_ad_costs_update = created.name
+    }
+    if (
+      bq.scheduled_queries.calculate_events_attribution ||
+      bq.scheduled_queries.facebook_ads_ad_costs_update ||
+      bq.scheduled_queries.google_ads_ad_costs_update ||
+      bq.scheduled_queries.tiktok_ads_ad_costs_update
+    ) {
+      bq.scheduled_queries.calculate_events_attribution = null
+      bq.scheduled_queries.facebook_ads_ad_costs_update = null
+      bq.scheduled_queries.google_ads_ad_costs_update = null
+      bq.scheduled_queries.tiktok_ads_ad_costs_update = null
       await projectResources.save()
     }
 
-    // 18. Create attribution calculation scheduled query
-    const attributionConfig = SCHEDULED_QUERY_CONFIGS.calculateEventsAttribution
-    const attributionDisplayName = attributionConfig.displayNamePrefix.replace(
+    // 18.1 Create the single "update costs + calculate attribution" scheduled
+    // query: refreshes ad costs of all connectors first, then recalculates
+    // attribution and traffic classification on the fresh ad_costs snapshot
+    const pipelineConfig = SCHEDULED_QUERY_CONFIGS.updateCostsAndCalculateAttribution
+    const pipelineDisplayName = pipelineConfig.displayNamePrefix.replace(
       '@PROJECT_ID',
       projectId.toString(),
     )
-    const attributionQueryResult =
-      await bigqueryApi.findScheduledQueryByName(attributionDisplayName)
-    if (attributionQueryResult.exists) {
-      if (!bq.scheduled_queries.calculate_events_attribution) {
-        bq.scheduled_queries.calculate_events_attribution = attributionQueryResult.name!
+    const pipelineQueryResult = await bigqueryApi.findScheduledQueryByName(pipelineDisplayName)
+    if (pipelineQueryResult.exists) {
+      if (!bq.scheduled_queries.update_costs_and_calculate_attribution) {
+        bq.scheduled_queries.update_costs_and_calculate_attribution = pipelineQueryResult.name!
         await projectResources.save()
       }
     } else {
-      console.log('Creating attribution calculation scheduled query...')
-      const attributionQuery = processScheduledQueryTemplate(
-        CALCULATE_EVENTS_ATTRIBUTION_TEMPLATE,
+      console.log('Creating update costs + calculate attribution scheduled query...')
+      const pipelineQuery = processScheduledQueryTemplate(
+        UPDATE_COSTS_AND_CALCULATE_ATTRIBUTION_TEMPLATE,
         {
           projectName: gcpProjectId,
           datasetName: bq.dataset.id,
@@ -502,14 +500,14 @@ const deployProjectResources = async (projectId: number, resourceGroupId: string
       )
 
       const created = await bigqueryApi.createScheduledQuery({
-        displayName: attributionDisplayName,
-        query: attributionQuery,
-        schedule: attributionConfig.schedule,
+        displayName: pipelineDisplayName,
+        query: pipelineQuery,
+        schedule: pipelineConfig.schedule,
         location: bq.dataset.location!,
         startNow: true,
       })
 
-      bq.scheduled_queries.calculate_events_attribution = created.name
+      bq.scheduled_queries.update_costs_and_calculate_attribution = created.name
       await projectResources.save()
     }
 
